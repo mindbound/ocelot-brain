@@ -11,6 +11,8 @@ import totoro.ocelot.brain.{Ocelot, Settings}
 object Loot {
   var OpenOsEEPROM: LootFactory = _
   var AdvLoaderEEPROM: LootFactory = _
+  var CyanBIOSEEPROM: LootFactory = _
+  var MineOSEFIEEPROM: LootFactory = _
 
   var NetworkFloppy: LootFactory = _
   var Plan9kFloppy: LootFactory = _
@@ -24,6 +26,8 @@ object Loot {
     // EEPROM
     OpenOsEEPROM = new EEPROMFactory("OpenOS BIOS", "bios.lua")
     AdvLoaderEEPROM = new EEPROMFactory("advancedLoader", "advLoader.lua")
+    CyanBIOSEEPROM = new EEPROMFactory("Cyan BIOS", "cyan.lua")
+    MineOSEFIEEPROM = new EEPROMFactory("MineOS EFI", "mineosEFI.lua")
 
     // Floppies
     NetworkFloppy = new FloppyFactory("Network (Network Stack)", DyeColor.LIME, "network")
