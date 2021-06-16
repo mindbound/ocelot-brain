@@ -55,10 +55,35 @@ class NativeLua53Architecture(machine: Machine) extends NativeLuaArchitecture(ma
 
   override def getRegistryIndex: Int = LuaStateFiveThree.lua_registryindex()
 
-  // TODO: integers
   override def transformNumber(index: Int): LuaValue.Number = {
-    assert(lua.isNumber(index))
-    LuaValue.Number(LuaNumber.Double(lua.toNumber(index)))
+    val absIndex = lua.absIndex(index)
+    assert(lua.isNumber(absIndex))
+
+    lua.getGlobal("math") // stack: math
+    lua.getField(-1, "type") // stack: math.type math
+    lua.pushValue(absIndex) // stack: <number> math.type math
+    lua.call(1, 1) // stack: <number type> math
+    val numberType = transformString(-1).toUtf8String
+    lua.pop(2) // stack restored
+
+    LuaValue.Number(numberType match {
+      case "integer" =>
+        lua.pushValue(absIndex) // stack: <integer>
+        lua.pushValue(-1) // stack: <integer> <integer>
+        lua.pushNumber(0x1_0000_0000L) // stack: 0x1_0000_0000 <integer> <integer>
+        lua.arith(LuaState.ArithOperator.MOD) // stack: <integer[31:0]> <integer>
+        val numberLow = lua.toNumber(-1).toLong
+
+        lua.arith(LuaState.ArithOperator.SUB) // stack: <integer - integer[31:0]>
+        lua.pushNumber(0x1_0000_0000L) // stack: 0x1_0000_0000 <integer - integer[31:0]>
+        lua.arith(LuaState.ArithOperator.DIV) // stack: <integer[63:32]>
+        val numberHigh = lua.toNumber(-1).toLong
+        lua.pop(1) // stack restored
+
+        LuaNumber.Integer((numberHigh << 32) | numberLow)
+
+      case "float" => LuaNumber.Double(lua.toNumber(index))
+    })
   }
 }
 
