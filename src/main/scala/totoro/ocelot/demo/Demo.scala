@@ -1,10 +1,11 @@
 package totoro.ocelot.demo
 
 import java.nio.file.Files
-
 import totoro.ocelot.brain.Ocelot
 import totoro.ocelot.brain.entity.traits.{Entity, Environment}
 import totoro.ocelot.brain.entity.{CPU, Case, GraphicsCard, HDDManaged, Memory, Redstone, Screen}
+import totoro.ocelot.brain.entity.machine.luac.StackFrameLua
+import totoro.ocelot.brain.entity.machine.debug.Debuggable
 import totoro.ocelot.brain.event._
 import totoro.ocelot.brain.loot.Loot
 import totoro.ocelot.brain.nbt.NBTTagCompound
@@ -209,6 +210,22 @@ object Demo extends App {
 
   while (loadedWorkspace.getIngameTime < 100) {
     loadedWorkspace.update()
+    val frames = computer.machine.architecture match {
+      case arch: Debuggable => arch.getStackFrames
+      case _ => List.empty
+    }
+
+    println("Stack frames retrieved:")
+    frames.foreach {
+      case f: StackFrameLua =>
+        println(
+          s"\t${f.index}: name = ${f.name}, nameWhat = ${f.nameWhat}, what = ${f.what}, source = ${f.source}, " +
+            s"current line = ${f.currentLine}, lines = ${f.lines}, ups = ${f.upvalueCount}, params = ${f.paramCount}, " +
+            s"is vararg = ${f.vararg}, is tail call = ${f.tailCall}, short source = ${f.shortSource}"
+        )
+      case _ => println("\t¯\\_(ツ)_/¯")
+    }
+
     Thread.sleep(50)
   }
 

@@ -506,6 +506,13 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   }
 
   private def pushMainThread(): Unit = {
+    // TODO remove this
+    for (i <- 0 to lua.getTop) {
+      if (lua.isThread(i)) {
+        lua.pushValue(i)
+        return
+      }
+    }
     lua.pushInteger(LuaState.RIDX_MAINTHREAD)
     lua.getTable(getRegistryIndex)
   }
@@ -626,10 +633,11 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     result
   }
 
-  private def getStackFrame(index: Int): Option[StackFrame] = {
+  private def getStackFrame(index: Int): Option[StackFrameLua] = {
     pushMainThread() // stack: <main thread>
-    lua.pushString("nSlut") // stack: "nSlut" <main thread>
-    callDebugFunction("getinfo", 2, 1) // stack: [nil | <stack frame>]
+    lua.pushNumber(index) // stack: <index> <main thread>
+    lua.pushString("nSlut") // stack: "nSlut" <index> <main thread>
+    callDebugFunction("getinfo", 3, 1) // stack: [nil | <stack frame>]
 
     val optionalLong = (v: Long) => {
       assert(v >= -1)
@@ -641,7 +649,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       }
     }
 
-    var result: Option[StackFrame] = None
+    var result: Option[StackFrameLua] = None
 
     if (lua.`type`(-1) == LuaType.TABLE) {
       // stack: <stack frame>
@@ -698,6 +706,6 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     result
   }
 
-  override def getStackFrames: List[StackFrame] =
+  override def getStackFrames: List[StackFrameLua] =
     LazyList.from(0).map(getStackFrame).takeWhile(_.nonEmpty).flatten.toList
 }
