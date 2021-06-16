@@ -1,24 +1,68 @@
 package totoro.ocelot.brain.entity.machine.luac
 
 import java.io.{FileNotFoundException, IOException}
-
 import com.google.common.base.Strings
 import li.cil.repack.com.naef.jnlua._
 import totoro.ocelot.brain.entity.machine.ExtendedLuaState.extendLuaState
 import totoro.ocelot.brain.entity.machine._
+import totoro.ocelot.brain.entity.machine.debug.{Debuggable, StackFrame}
 import totoro.ocelot.brain.entity.traits.{Entity, Memory}
 import totoro.ocelot.brain.nbt.NBTTagCompound
 import totoro.ocelot.brain.{Ocelot, Settings}
 
+abstract class StackFrameLuaWhat
+
+object StackFrameLuaWhat {
+  case class Lua() extends StackFrameLuaWhat
+  case class C() extends StackFrameLuaWhat
+  case class Main() extends StackFrameLuaWhat
+}
+
+abstract class StackFrameLuaSource
+
+object StackFrameLuaSource {
+  case class File(name: scala.Predef.String) extends StackFrameLuaSource
+  case class String(code: List[Byte]) extends StackFrameLuaSource
+  case class Other(source: scala.Predef.String) extends StackFrameLuaSource
+}
+
+case class StackFrameLua(index: Int,
+                         name: Option[String],
+                         nameWhat: Option[String],
+                         what: StackFrameLuaWhat,
+                         source: StackFrameLuaSource,
+                         currentLine: Option[Long],
+                         lines: Option[(Long, Long)],
+                         upvalueCount: Int,
+                         paramCount: Int,
+                         vararg: Boolean,
+                         tailCall: Boolean,
+                         shortSource: String) extends StackFrame
+
 class NativeLua52Architecture(machine: Machine) extends NativeLuaArchitecture(machine) {
   override def factory: LuaStateFactory.Lua52.type = LuaStateFactory.Lua52
+
+  override def getRegistryIndex: Int = LuaState.lua_registryindex()
+
+  override def transformNumber(index: Int): LuaValue.Number = {
+    assert(lua.isNumber(index))
+    LuaValue.Number(LuaNumber.Double(lua.toNumber(index)))
+  }
 }
 
 class NativeLua53Architecture(machine: Machine) extends NativeLuaArchitecture(machine) {
   override def factory: LuaStateFactory.Lua53.type = LuaStateFactory.Lua53
+
+  override def getRegistryIndex: Int = LuaStateFiveThree.lua_registryindex()
+
+  // TODO: integers
+  override def transformNumber(index: Int): LuaValue.Number = {
+    assert(lua.isNumber(index))
+    LuaValue.Number(LuaNumber.Double(lua.toNumber(index)))
+  }
 }
 
-abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture {
+abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture with Debuggable {
   protected def factory: LuaStateFactory
 
   private[machine] var lua: LuaState = _
@@ -425,4 +469,210 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     // Limit memory again.
     recomputeMemory(machine.host.inventory)
   }
+
+  // ----------------------------------------------------------------------- //
+  // debug interface follows from now on -- an Ocelot extension
+
+  protected def getRegistryIndex: Int
+
+  private def pushGlobalEnvironment(): Unit = {
+    lua.pushInteger(LuaState.RIDX_GLOBALS)
+    lua.getTable(getRegistryIndex)
+  }
+
+  private def pushMainThread(): Unit = {
+    lua.pushInteger(LuaState.RIDX_MAINTHREAD)
+    lua.getTable(getRegistryIndex)
+  }
+
+  private def callDebugFunction(funcName: String, paramCount: Int, resultCount: Int): Unit = {
+    pushGlobalEnvironment() // stack: <env> params...
+    lua.getField(-1, "debug") // stack: debug <env> params...
+    lua.remove(-2) // stack: debug params...
+    lua.getField(-1, funcName) // stack: debug[funcName] debug params...
+    assert(lua.`type`(-1) == LuaType.FUNCTION, "attempted to call something that was not a function")
+    lua.remove(-2) // stack: debug[funcName] params...
+    lua.insert(-paramCount - 1) // stack: params... debug[funcName]
+    lua.call(paramCount, resultCount) // stack: results...
+  }
+
+  protected def transformNil(index: Int): LuaValue.Nil = {
+    assert(lua.isNil(index))
+
+    LuaValue.Nil()
+  }
+
+  protected def transformBoolean(index: Int): LuaValue.Boolean = {
+    assert(lua.isBoolean(index))
+
+    LuaValue.Boolean(lua.toBoolean(index))
+  }
+
+  protected def transformNumber(index: Int): LuaValue.Number
+
+  protected def transformString(index: Int): LuaValue.String = {
+    assert(lua.isString(index))
+
+    LuaValue.String(lua.toByteArray(index).toList)
+  }
+
+  protected def transformFunction(index: Int): LuaValue.Function = {
+    assert(lua.isFunction(index))
+
+    LuaValue.Function(lua.toPointer(index))
+  }
+
+  protected def transformUserdata(index: Int): LuaValue.Userdata = {
+    val `type` = lua.`type`(index)
+    assert(`type` == LuaType.USERDATA || `type` == LuaType.LIGHTUSERDATA)
+
+    LuaValue.Userdata(lua.toPointer(index))
+  }
+
+  protected def transformThread(index: Int): LuaValue.Thread = {
+    assert(lua.isThread(index))
+
+    LuaValue.Thread(lua.toPointer(index))
+  }
+
+  protected def transformTable(index: Int): LuaValue.Table = {
+    assert(lua.isTable(index))
+
+    val absoluteIndex = lua.absIndex(index)
+    lua.pushNil()
+
+    LuaValue.Table(Iterator.continually(lua.next(absoluteIndex)).takeWhile(identity).map(_ => {
+      val key = transformValue(-2).get
+      val value = transformValue(-1).get
+      lua.pop(1)
+
+      (key, value)
+    }).toMap)
+  }
+
+  protected def transformValue(index: Int): Option[LuaValue] = {
+    lua.`type`(index) match {
+      case null =>
+        None
+
+      case LuaType.NIL =>
+        Some(transformNil(index))
+
+      case LuaType.BOOLEAN =>
+        Some(transformBoolean(index))
+
+      case LuaType.NUMBER =>
+        Some(transformNumber(index))
+
+      case LuaType.STRING =>
+        Some(transformString(index))
+
+      case LuaType.FUNCTION =>
+        Some(transformFunction(index))
+
+      case LuaType.USERDATA | LuaType.LIGHTUSERDATA =>
+        Some(transformUserdata(index))
+
+      case LuaType.THREAD =>
+        Some(transformThread(index))
+
+      case LuaType.TABLE =>
+        Some(transformTable(index))
+    }
+  }
+
+  protected def transformNillable[T](transformer: Int => T)(index: Int): Option[T] = {
+    assert(!lua.isNone(index))
+
+    if (lua.isNil(index)) {
+      None
+    } else {
+      Some(transformer(index))
+    }
+  }
+
+  protected def transformField[T](transformer: Int => T, field: String)(index: Int): T = {
+    assert(lua.isTable(index))
+
+    lua.getField(index, field)
+    val result = transformer(-1)
+    lua.pop(1)
+
+    result
+  }
+
+  private def getStackFrame(index: Int): Option[StackFrame] = {
+    pushMainThread() // stack: <main thread>
+    lua.pushString("nSlut") // stack: "nSlut" <main thread>
+    callDebugFunction("getinfo", 2, 1) // stack: [nil | <stack frame>]
+
+    val optionalLong = (v: Long) => {
+      assert(v >= -1)
+
+      if (v == -1) {
+        None
+      } else {
+        Some(v)
+      }
+    }
+
+    var result: Option[StackFrame] = None
+
+    if (lua.`type`(-1) == LuaType.TABLE) {
+      // stack: <stack frame>
+      val name = transformField(transformNillable(transformString), "name")(-1).map(_.toUtf8String)
+
+      val nameWhat = transformField(transformNillable(transformString), "namewhat")(-1).map(_.toUtf8String)
+
+      val what = transformField(transformString, "what")(-1).toUtf8String match {
+        case "C" => StackFrameLuaWhat.C()
+        case "Lua" => StackFrameLuaWhat.Lua()
+        case "main" => StackFrameLuaWhat.Main()
+      }
+
+      val source = {
+        val sourceStr = transformField(transformString, "source")(-1).value
+
+        sourceStr.headOption match {
+          case Some('@') => StackFrameLuaSource.File(LuaValue.String(sourceStr.tail).toUtf8String)
+          case Some('=') => StackFrameLuaSource.Other(LuaValue.String(sourceStr.tail).toUtf8String)
+          case _ => StackFrameLuaSource.String(sourceStr)
+        }
+      }
+
+      val currentLine = optionalLong(transformField(transformNumber, "currentline")(-1).value.toLong)
+      val lineDefined = optionalLong(transformField(transformNumber, "linedefined")(-1).value.toLong)
+
+      val lastLineDefined =
+        optionalLong(transformField(transformNumber, "lastlinedefined")(-1).value.toLong)
+
+      val upvalueCount = transformField(transformNumber, "nups")(-1).value.toLong
+      val paramCount = transformField(transformNumber, "nparams")(-1).value.toLong
+      val isVararg = transformField(transformBoolean, "isvararg")(-1).value
+      val isTailCall = transformField(transformBoolean, "istailcall")(-1).value
+      val shortSource = transformField(transformString, "short_src")(-1).toUtf8String
+
+      result = Some(StackFrameLua(
+        index = index,
+        name = name,
+        nameWhat = nameWhat,
+        what = what,
+        source = source,
+        currentLine = currentLine,
+        lines = lineDefined.zip(lastLineDefined),
+        upvalueCount = upvalueCount.toInt,
+        paramCount = paramCount.toInt,
+        vararg = isVararg,
+        tailCall = isTailCall,
+        shortSource = shortSource
+      ))
+    }
+
+    lua.pop(1) // stack restored
+
+    result
+  }
+
+  override def getStackFrames: List[StackFrame] =
+    LazyList.from(0).map(getStackFrame).takeWhile(_.nonEmpty).flatten.toList
 }
