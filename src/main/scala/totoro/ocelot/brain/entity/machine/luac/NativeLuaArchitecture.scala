@@ -45,7 +45,7 @@ class NativeLua52Architecture(machine: Machine) extends NativeLuaArchitecture(ma
   override def getRegistryIndex: Int = LuaState.lua_registryindex()
 
   override def transformNumber(index: Int): LuaValue.Number = {
-    assert(lua.isNumber(index))
+    checkType(index, LuaType.NUMBER)
     LuaValue.Number(LuaNumber.Double(lua.toNumber(index)))
   }
 }
@@ -55,9 +55,9 @@ class NativeLua53Architecture(machine: Machine) extends NativeLuaArchitecture(ma
 
   override def getRegistryIndex: Int = LuaStateFiveThree.lua_registryindex()
 
-  override def transformNumber(index: Int): LuaValue.Number = {
+  override def transformNumber(index: Int): LuaValue.Number = ensureLuaStack(0) {
     val absIndex = lua.absIndex(index)
-    assert(lua.isNumber(absIndex))
+    checkType(index, LuaType.NUMBER)
 
     lua.getGlobal("math") // stack: math
     lua.getField(-1, "type") // stack: math.type math
@@ -68,19 +68,42 @@ class NativeLua53Architecture(machine: Machine) extends NativeLuaArchitecture(ma
 
     LuaValue.Number(numberType match {
       case "integer" =>
-        lua.pushValue(absIndex) // stack: <integer>
-        lua.pushValue(-1) // stack: <integer> <integer>
-        lua.pushNumber(0x1_0000_0000L) // stack: 0x1_0000_0000 <integer> <integer>
-        lua.arith(LuaState.ArithOperator.MOD) // stack: <integer[31:0]> <integer>
+        lua.pushNumber(0) // stack: 0
+        lua.pushValue(absIndex) // stack: <integer> 0
+        val neg = lua.compare(-1, -2, LuaState.RelOperator.LT)
+
+        if (neg) {
+          lua.arith(LuaState.ArithOperator.SUB) // stack: <|integer|>
+        } else {
+          lua.replace(-2) // stack: <|integer|>
+        }
+
+        lua.pushValue(-1) // stack: <|integer|> <|integer|>
+        lua.pushNumber(0x1_0000_0000L) // stack: 0x1_0000_0000 <|integer|> <|integer|>
+
+        // don't worry (though you probably should, nevermind)
+        // Lua 5.3 has changed the order of the operators so it no longer
+        // corresponds to that defined in the wrapper
+        // (LuaState.ArithOperator)
+        // in particular, .UNM is actually integer division (//) and
+        // .DIV is the remainder operation (%)
+        lua.arith(LuaState.ArithOperator.DIV) // stack: <|integer|[31:0]> <|integer|>
         val numberLow = lua.toNumber(-1).toLong
 
-        lua.arith(LuaState.ArithOperator.SUB) // stack: <integer - integer[31:0]>
-        lua.pushNumber(0x1_0000_0000L) // stack: 0x1_0000_0000 <integer - integer[31:0]>
-        lua.arith(LuaState.ArithOperator.DIV) // stack: <integer[63:32]>
+        lua.arith(LuaState.ArithOperator.SUB) // stack: <|integer| - |integer|[31:0]>
+        lua.pushNumber(0x1_0000_0000L) // stack: 0x1_0000_0000 <|integer| - |integer|[31:0]>
+        lua.arith(LuaState.ArithOperator.UNM) // stack: <|integer|[63:32]>
         val numberHigh = lua.toNumber(-1).toLong
         lua.pop(1) // stack restored
 
-        LuaNumber.Integer((numberHigh << 32) | numberLow)
+        val absoluteValue = (numberHigh << 32) | numberLow
+        assert(absoluteValue >= 0)
+
+        LuaNumber.Integer(if (neg) {
+          -absoluteValue
+        } else {
+          absoluteValue
+        })
 
       case "float" => LuaNumber.Double(lua.toNumber(index))
     })
@@ -500,19 +523,30 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
 
   protected def getRegistryIndex: Int
 
+  protected def ensureLuaStack[T](delta: Int)(f: => T): T = {
+    val expectedStackLevel = lua.getTop + delta
+    val result = f
+    val actualStackLevel = lua.getTop
+
+    assert(
+      actualStackLevel == expectedStackLevel,
+      s"corrupted stack: expected to have $expectedStackLevel entries, got $actualStackLevel"
+    )
+
+    result
+  }
+
+  protected def checkType(index: Int, expected: LuaType): Unit = {
+    val `type` = lua.`type`(index)
+
+    assert(`type` == expected, s"invalid value: expected $expected, got ${`type`}: ${transformValue(index)}")
+  }
+
   private def pushGlobalEnvironment(): Unit = {
-    lua.pushInteger(LuaState.RIDX_GLOBALS)
-    lua.getTable(getRegistryIndex)
+    lua.rawGet(getRegistryIndex, LuaState.RIDX_GLOBALS)
   }
 
   private def pushMainThread(): Unit = {
-    // TODO remove this
-    for (i <- 0 to lua.getTop) {
-      if (lua.isThread(i)) {
-        lua.pushValue(i)
-        return
-      }
-    }
     lua.pushInteger(LuaState.RIDX_MAINTHREAD)
     lua.getTable(getRegistryIndex)
   }
@@ -522,53 +556,53 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     lua.getField(-1, "debug") // stack: debug <env> params...
     lua.remove(-2) // stack: debug params...
     lua.getField(-1, funcName) // stack: debug[funcName] debug params...
-    assert(lua.`type`(-1) == LuaType.FUNCTION, "attempted to call something that was not a function")
+    checkType(-1, LuaType.FUNCTION)
     lua.remove(-2) // stack: debug[funcName] params...
     lua.insert(-paramCount - 1) // stack: params... debug[funcName]
     lua.call(paramCount, resultCount) // stack: results...
   }
 
-  protected def transformNil(index: Int): LuaValue.Nil = {
-    assert(lua.isNil(index))
+  protected def transformNil(index: Int): LuaValue.Nil = ensureLuaStack(0) {
+    checkType(index, LuaType.NIL)
 
     LuaValue.Nil()
   }
 
-  protected def transformBoolean(index: Int): LuaValue.Boolean = {
-    assert(lua.isBoolean(index))
+  protected def transformBoolean(index: Int): LuaValue.Boolean = ensureLuaStack(0) {
+    checkType(index, LuaType.BOOLEAN)
 
     LuaValue.Boolean(lua.toBoolean(index))
   }
 
   protected def transformNumber(index: Int): LuaValue.Number
 
-  protected def transformString(index: Int): LuaValue.String = {
-    assert(lua.isString(index))
+  protected def transformString(index: Int): LuaValue.String = ensureLuaStack(0) {
+    checkType(index, LuaType.STRING)
 
     LuaValue.String(lua.toByteArray(index).toList)
   }
 
-  protected def transformFunction(index: Int): LuaValue.Function = {
-    assert(lua.isFunction(index))
+  protected def transformFunction(index: Int): LuaValue.Function = ensureLuaStack(0) {
+    checkType(index, LuaType.FUNCTION)
 
     LuaValue.Function(lua.toPointer(index))
   }
 
-  protected def transformUserdata(index: Int): LuaValue.Userdata = {
+  protected def transformUserdata(index: Int): LuaValue.Userdata = ensureLuaStack(0) {
     val `type` = lua.`type`(index)
-    assert(`type` == LuaType.USERDATA || `type` == LuaType.LIGHTUSERDATA)
+    assert(`type` == LuaType.USERDATA || `type` == LuaType.LIGHTUSERDATA, s"expected userdata, got ${`type`}")
 
     LuaValue.Userdata(lua.toPointer(index))
   }
 
-  protected def transformThread(index: Int): LuaValue.Thread = {
-    assert(lua.isThread(index))
+  protected def transformThread(index: Int): LuaValue.Thread = ensureLuaStack(0) {
+    checkType(index, LuaType.THREAD)
 
     LuaValue.Thread(lua.toPointer(index))
   }
 
-  protected def transformTable(index: Int): LuaValue.Table = {
-    assert(lua.isTable(index))
+  protected def transformTable(index: Int): LuaValue.Table = ensureLuaStack(0) {
+    checkType(index, LuaType.TABLE)
 
     val absoluteIndex = lua.absIndex(index)
     lua.pushNil()
@@ -582,7 +616,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     }).toMap)
   }
 
-  protected def transformValue(index: Int): Option[LuaValue] = {
+  protected def transformValue(index: Int): Option[LuaValue] = ensureLuaStack(0) {
     lua.`type`(index) match {
       case null =>
         None
@@ -613,7 +647,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     }
   }
 
-  protected def transformNillable[T](transformer: Int => T)(index: Int): Option[T] = {
+  protected def transformNillable[T](transformer: Int => T)(index: Int): Option[T] = ensureLuaStack(0) {
     assert(!lua.isNone(index))
 
     if (lua.isNil(index)) {
@@ -623,24 +657,36 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     }
   }
 
-  protected def transformField[T](transformer: Int => T, field: String)(index: Int): T = {
-    assert(lua.isTable(index))
+  protected def transformField[T](transformer: Int => T, field: String)(index: Int): T = ensureLuaStack(0) {
+    checkType(index, LuaType.TABLE)
 
-    lua.getField(index, field)
+    lua.getField(index, field) // stack: <table>[<field>]
     val result = transformer(-1)
-    lua.pop(1)
+    lua.pop(1) // stack restored
 
     result
   }
 
-  private def getStackFrame(index: Int): Option[StackFrameLua] = {
-    pushMainThread() // stack: <main thread>
-    lua.pushNumber(index) // stack: <index> <main thread>
-    lua.pushString("nSlut") // stack: "nSlut" <index> <main thread>
+  private def getStackFrame(coroutineIndex: Int)(index: Int): Option[StackFrameLua] = ensureLuaStack(0) {
+    if (lua == null) {
+      return None
+    }
+
+    lua.pushValue(coroutineIndex) // stack: <thread>
+    lua.pushNumber(index) // stack: <index> <thread>
+
+    val debugInfoOptions =
+      "n" + // name, nameWhat
+      "S" + // source, short_src, linedefined, lastlinedefined, what
+      "l" + // currentline
+      "t" + // istailcall
+      "u"   // nups, nparams, isvararg
+
+    lua.pushString(debugInfoOptions) // stack: "nSltu" <index> <thread>
     callDebugFunction("getinfo", 3, 1) // stack: [nil | <stack frame>]
 
     val optionalLong = (v: Long) => {
-      assert(v >= -1)
+      assert(v >= -1, s"debug.info produced the value $v, which is invalid")
 
       if (v == -1) {
         None
@@ -654,7 +700,6 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     if (lua.`type`(-1) == LuaType.TABLE) {
       // stack: <stack frame>
       val name = transformField(transformNillable(transformString), "name")(-1).map(_.toUtf8String)
-
       val nameWhat = transformField(transformNillable(transformString), "namewhat")(-1).map(_.toUtf8String)
 
       val what = transformField(transformString, "what")(-1).toUtf8String match {
@@ -706,6 +751,12 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     result
   }
 
-  override def getStackFrames: List[StackFrameLua] =
-    LazyList.from(0).map(getStackFrame).takeWhile(_.nonEmpty).flatten.toList
+  def getStackFrames: List[StackFrameLua] = ensureLuaStack(0) {
+    pushMainThread()
+    val result = LazyList.from(0).map(getStackFrame(-1)).takeWhile(_.nonEmpty).flatten.toList
+    lua.pop(1)
+
+    result
+  }
+
 }
