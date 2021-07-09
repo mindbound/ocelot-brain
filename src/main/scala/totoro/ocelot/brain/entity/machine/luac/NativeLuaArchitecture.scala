@@ -532,6 +532,12 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
 
   protected def getRegistryIndex: Int
 
+  protected def checkType(index: Int, expected: LuaType): Unit = {
+    val `type` = lua.`type`(index)
+
+    assert(`type` == expected, s"invalid value: expected $expected, got ${`type`}: ${transformValue(index)}")
+  }
+
   protected def ensureLuaStack[T](delta: Int)(f: => T): T = {
     val expectedStackLevel = lua.getTop + delta
     val result = f
@@ -543,12 +549,6 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     )
 
     result
-  }
-
-  protected def checkType(index: Int, expected: LuaType): Unit = {
-    val `type` = lua.`type`(index)
-
-    assert(`type` == expected, s"invalid value: expected $expected, got ${`type`}: ${transformValue(index)}")
   }
 
   private def pushGlobalEnvironment(): Unit = {
@@ -571,6 +571,8 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     lua.call(paramCount, resultCount) // stack: results...
   }
 
+  protected def transformNumber(index: Int): LuaValue.Number
+
   protected def transformNil(index: Int): LuaValue.Nil = ensureLuaStack(0) {
     checkType(index, LuaType.NIL)
 
@@ -582,8 +584,6 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
 
     LuaValue.Boolean(lua.toBoolean(index))
   }
-
-  protected def transformNumber(index: Int): LuaValue.Number
 
   protected def transformString(index: Int): LuaValue.String = ensureLuaStack(0) {
     checkType(index, LuaType.STRING)
@@ -604,77 +604,198 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     LuaValue.Userdata(lua.toPointer(index))
   }
 
-  protected def transformThread(index: Int): LuaValue.Thread = ensureLuaStack(0) {
-    checkType(index, LuaType.THREAD)
+  protected class LuaTransformer {
+    val visitedCompoundValues: scala.collection.mutable.Set[Long] = scala.collection.mutable.HashSet.empty
 
-    val absIndex = lua.absIndex(index)
+    def transformThread(index: Int): LuaValue.Thread = ensureLuaStack(0) {
+      checkType(index, LuaType.THREAD)
 
-    pushGlobalEnvironment() // stack: _G
-    lua.getField(-1, "coroutine") // stack: coroutine _G
-    lua.getField(-1, "status") // stack: coroutine.status coroutine _G
-    lua.pushValue(absIndex) // stack: <thread> coroutine.status coroutine _G
-    lua.call(1, 1) // stack: <status> coroutine _G
+      val absIndex = lua.absIndex(index)
 
-    val state = transformString(-1).toUtf8String match {
-      case "running" => LuaThreadState.Running()
-      case "suspended" => LuaThreadState.Suspended()
-      case "normal" => LuaThreadState.Normal()
-      case "dead" => LuaThreadState.Dead()
+      pushGlobalEnvironment() // stack: _G
+      lua.getField(-1, "coroutine") // stack: coroutine _G
+      lua.getField(-1, "status") // stack: coroutine.status coroutine _G
+      lua.pushValue(absIndex) // stack: <thread> coroutine.status coroutine _G
+      lua.call(1, 1) // stack: <status> coroutine _G
+
+      val state = transformString(-1).toUtf8String match {
+        case "running" => LuaValue.Thread.State.Running()
+        case "suspended" => LuaValue.Thread.State.Suspended()
+        case "normal" => LuaValue.Thread.State.Normal()
+        case "dead" => LuaValue.Thread.State.Dead()
+      }
+
+      lua.pop(3) // stack restored
+
+      val address = lua.toPointer(absIndex)
+
+      if (visitedCompoundValues add address) {
+        LuaValue.Thread.Owned(address, state, getThreadStackFrames(absIndex))
+      } else {
+        LuaValue.Thread.Recursion(address, state)
+      }
     }
 
-    lua.pop(3) // stack restored
+    def transformTable(index: Int): LuaValue.Table = ensureLuaStack(0) {
+      checkType(index, LuaType.TABLE)
 
-    LuaValue.Thread(lua.toPointer(index), state, getThreadStackFrames(absIndex))
-  }
+      val address = lua.toPointer(index)
 
-  protected def transformTable(index: Int): LuaValue.Table = ensureLuaStack(0) {
-    checkType(index, LuaType.TABLE)
+      if (visitedCompoundValues add address) {
+        val absoluteIndex = lua.absIndex(index)
+        lua.pushNil()
 
-    val absoluteIndex = lua.absIndex(index)
-    lua.pushNil()
+        LuaValue.Table.Owned(
+          address,
+          Iterator.continually(lua.next(absoluteIndex)).takeWhile(identity).map(_ => {
+            val key = transformValue(-2).get
+            val value = transformValue(-1).get
+            lua.pop(1)
 
-    LuaValue.Table(
-      lua.toPointer(absoluteIndex),
-      Iterator.continually(lua.next(absoluteIndex)).takeWhile(identity).map(_ => {
-        val key = transformValue(-2).get
-        val value = transformValue(-1).get
-        lua.pop(1)
+            (key, value)
+          }).toMap
+        )
+      } else {
+        LuaValue.Table.Recursion(address)
+      }
+    }
 
-        (key, value)
-      }).toMap
-    )
-  }
+    def transformValue(index: Int): Option[LuaValue] = ensureLuaStack(0) {
+      lua.`type`(index) match {
+        case null =>
+          None
 
-  protected def transformValue(index: Int): Option[LuaValue] = ensureLuaStack(0) {
-    lua.`type`(index) match {
-      case null =>
-        None
+        case LuaType.NIL =>
+          Some(transformNil(index))
 
-      case LuaType.NIL =>
-        Some(transformNil(index))
+        case LuaType.BOOLEAN =>
+          Some(transformBoolean(index))
 
-      case LuaType.BOOLEAN =>
-        Some(transformBoolean(index))
+        case LuaType.NUMBER =>
+          Some(transformNumber(index))
 
-      case LuaType.NUMBER =>
-        Some(transformNumber(index))
+        case LuaType.STRING =>
+          Some(transformString(index))
 
-      case LuaType.STRING =>
-        Some(transformString(index))
+        case LuaType.FUNCTION =>
+          Some(transformFunction(index))
 
-      case LuaType.FUNCTION =>
-        Some(transformFunction(index))
+        case LuaType.USERDATA | LuaType.LIGHTUSERDATA =>
+          Some(transformUserdata(index))
 
-      case LuaType.USERDATA | LuaType.LIGHTUSERDATA =>
-        Some(transformUserdata(index))
+        case LuaType.THREAD =>
+          Some(transformThread(index))
 
-      case LuaType.THREAD =>
-        Some(transformThread(index))
+        case LuaType.TABLE =>
+          Some(transformTable(index))
+      }
+    }
 
-      case LuaType.TABLE =>
-        Some(transformTable(index))
+    private def getStackFrameLocal(coroutineIndex: Int, frameIndex: Int, localIndex: Int): Option[LuaLocal] =
+      ensureLuaStack(0) {
+        checkType(coroutineIndex, LuaType.THREAD)
+        assert(localIndex != 0)
+
+        lua.pushValue(coroutineIndex) // stack: <thread>
+        lua.pushNumber(frameIndex) // stack: <frameIndex> <thread>
+        lua.pushNumber(localIndex) // stack: <localIndex> <frameIndex> <thread>
+        callDebugFunction("getlocal", 3, 2) // stack: [nil nil | <value> <name>]
+
+        val result = if (lua.isNil(-2)) {
+          None
+        } else {
+          val name = transformString(-2).toUtf8String
+          val value = transformValue(-1).get
+
+          Some(LuaLocal(name = name, value = value))
+        }
+
+        lua.pop(2)
+
+        result
+      }
+
+    private def getStackFrameParams(coroutineIndex: Int, frameIndex: Int): List[LuaLocal] = ensureLuaStack(0) {
+      checkType(coroutineIndex, LuaType.THREAD)
+
+      LazyList.from(-1, -1).map(getStackFrameLocal(coroutineIndex, frameIndex, _)).takeWhile(_.nonEmpty).flatten.toList
+    }
+
+    private def getStackFrameLocals(coroutineIndex: Int, frameIndex: Int): List[LuaLocal] = ensureLuaStack(0) {
+      checkType(coroutineIndex, LuaType.THREAD)
+
+      LazyList.from(1).map(getStackFrameLocal(coroutineIndex, frameIndex, _)).takeWhile(_.nonEmpty).flatten.toList
+    }
+
+    private def getStackFrameUpvalues(coroutineIndex: Int, frameIndex: Int): List[LuaUpvalue] =
+      ensureLuaStack(0) {
+        checkType(coroutineIndex, LuaType.THREAD)
+
+        lua.pushValue(coroutineIndex) // stack: <thread>
+        lua.pushNumber(frameIndex) // stack: <frameIndex> <thread>
+        lua.pushString("f") // stack: "f" <frameIndex> <thread>
+        callDebugFunction("getinfo", 3, 1) // stack: [nil | {func = <f>}]
+        checkType(-1, LuaType.TABLE) // stack: {func = <f>}
+        lua.getField(-1, "func") // stack: <f> {func = <f>}
+        lua.replace(-2) // stack: <f>
+
+        // TODO: I'm not sure if we're always going to get a function here — investigate
+        checkType(-1, LuaType.FUNCTION)
+
+        val result = LazyList.from(1).map(ensureLuaStack(0) { uvIndex: Int =>
+          lua.pushValue(-1) // stack: <f> <f>
+          lua.pushNumber(uvIndex) // stack: <uvIndex> <f> <f>
+          callDebugFunction("getupvalue", 2, 2) // stack: [nil nil | <value> <name>] <f>
+
+          if (lua.isNil(-2)) {
+            lua.pop(2) // stack: <f>
+
+            None
+          } else {
+            val name = transformString(-2).toUtf8String
+            val value = transformValue(-1).get
+
+            lua.pushValue(-3) // stack: <f> <value> <name> <f>
+            lua.pushNumber(uvIndex) // stack: <uvIndex> <f> <value> <name> <f>
+            callDebugFunction("upvalueid", 2, 1) // stack: <id> <value> <name> <f>
+            checkType(-1, LuaType.LIGHTUSERDATA)
+
+            val id = lua.toPointer(-1)
+
+            lua.pop(3) // stack: <f>
+
+            Some(LuaUpvalue(id = id, name = name, value = value))
+          }
+        }).takeWhile(_.nonEmpty).flatten.toList
+
+        lua.pop(1) // stack restored
+
+        result
+      }
+
+    def getThreadStackFrame(coroutineIndex: Int)(index: Int): Option[StackFrameLua] = ensureLuaStack(0) {
+      if (lua == null) {
+        return None
+      }
+
+      getStackFrameInfo(coroutineIndex, index).map(info => StackFrameLua(
+        info = info,
+        params = getStackFrameParams(coroutineIndex, index),
+        locals = getStackFrameLocals(coroutineIndex, index),
+        upvalues = getStackFrameUpvalues(coroutineIndex, index),
+      ))
+    }
+
+    def getThreadStackFrames(coroutineIndex: Int): List[StackFrameLua] = ensureLuaStack(0) {
+      LazyList.from(0).map(getThreadStackFrame(coroutineIndex)).takeWhile(_.nonEmpty).flatten.toList
     }
   }
+
+  protected def transformThread(index: Int): LuaValue.Thread = (new LuaTransformer).transformThread(index)
+
+  protected def transformTable(index: Int): LuaValue.Table = (new LuaTransformer).transformTable(index)
+
+  protected def transformValue(index: Int): Option[LuaValue] = (new LuaTransformer).transformValue(index)
 
   protected def transformNillable[T](transformer: Int => T)(index: Int): Option[T] = ensureLuaStack(0) {
     assert(!lua.isNone(index))
@@ -774,104 +895,8 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     result
   }
 
-  private def getStackFrameLocal(coroutineIndex: Int, frameIndex: Int, localIndex: Int): Option[LuaLocal] =
-    ensureLuaStack(0) {
-      checkType(coroutineIndex, LuaType.THREAD)
-      assert(localIndex != 0)
-
-      lua.pushValue(coroutineIndex) // stack: <thread>
-      lua.pushNumber(frameIndex) // stack: <frameIndex> <thread>
-      lua.pushNumber(localIndex) // stack: <localIndex> <frameIndex> <thread>
-      callDebugFunction("getlocal", 3, 2) // stack: [nil nil | <value> <name>]
-
-      val result = if (lua.isNil(-2)) {
-        None
-      } else {
-        val name = transformString(-2).toUtf8String
-        val value = transformValue(-1).get
-
-        Some(LuaLocal(name = name, value = value))
-      }
-
-      lua.pop(2)
-
-      result
-    }
-
-  private def getStackFrameParams(coroutineIndex: Int, frameIndex: Int): List[LuaLocal] = ensureLuaStack(0) {
-    checkType(coroutineIndex, LuaType.THREAD)
-
-    LazyList.from(-1, -1).map(getStackFrameLocal(coroutineIndex, frameIndex, _)).takeWhile(_.nonEmpty).flatten.toList
-  }
-
-  private def getStackFrameLocals(coroutineIndex: Int, frameIndex: Int): List[LuaLocal] = ensureLuaStack(0) {
-    checkType(coroutineIndex, LuaType.THREAD)
-
-    LazyList.from(1).map(getStackFrameLocal(coroutineIndex, frameIndex, _)).takeWhile(_.nonEmpty).flatten.toList
-  }
-
-  private def getStackFrameUpvalues(coroutineIndex: Int, frameIndex: Int): List[LuaUpvalue] =
-    ensureLuaStack(0) {
-      checkType(coroutineIndex, LuaType.THREAD)
-
-      lua.pushValue(coroutineIndex) // stack: <thread>
-      lua.pushNumber(frameIndex) // stack: <frameIndex> <thread>
-      lua.pushString("f") // stack: "f" <frameIndex> <thread>
-      callDebugFunction("getinfo", 3, 1) // stack: [nil | {func = <f>}]
-      checkType(-1, LuaType.TABLE) // stack: {func = <f>}
-      lua.getField(-1, "func") // stack: <f> {func = <f>}
-      lua.replace(-2) // stack: <f>
-
-      // TODO: I'm not sure if we're always going to get a function here — investigate
-      checkType(-1, LuaType.FUNCTION)
-
-      val result = LazyList.from(1).map(ensureLuaStack(0) { uvIndex: Int =>
-        lua.pushValue(-1) // stack: <f> <f>
-        lua.pushNumber(uvIndex) // stack: <uvIndex> <f> <f>
-        callDebugFunction("getupvalue", 2, 2) // stack: [nil nil | <value> <name>] <f>
-
-        if (lua.isNil(-2)) {
-          lua.pop(2) // stack: <f>
-
-          None
-        } else {
-          val name = transformString(-2).toUtf8String
-          val value = transformValue(-1).get
-
-          lua.pushValue(-3) // stack: <f> <value> <name> <f>
-          lua.pushNumber(uvIndex) // stack: <uvIndex> <f> <value> <name> <f>
-          callDebugFunction("upvalueid", 2, 1) // stack: <id> <value> <name> <f>
-          checkType(-1, LuaType.LIGHTUSERDATA)
-
-          val id = lua.toPointer(-1)
-
-          lua.pop(3) // stack: <f>
-
-          Some(LuaUpvalue(id = id, name = name, value = value))
-        }
-      }).takeWhile(_.nonEmpty).flatten.toList
-
-      lua.pop(1) // stack restored
-
-      result
-    }
-
-  private def getStackFrame(coroutineIndex: Int)(index: Int): Option[StackFrameLua] = ensureLuaStack(0) {
-    if (lua == null) {
-      return None
-    }
-
-    getStackFrameInfo(coroutineIndex, index) map {info => StackFrameLua(
-      info = info,
-      params = getStackFrameParams(coroutineIndex, index),
-      locals = getStackFrameLocals(coroutineIndex, index),
-      upvalues = getStackFrameUpvalues(coroutineIndex, index),
-    )}
-  }
-
-  private def getThreadStackFrames(coroutineIndex: Int) = ensureLuaStack(0) {
-    LazyList.from(0).map(getStackFrame(coroutineIndex)).takeWhile(_.nonEmpty).flatten.toList
-  }
+  private def getThreadStackFrames(coroutineIndex: Int): List[StackFrameLua] =
+    (new LuaTransformer).getThreadStackFrames(coroutineIndex)
 
   def getStackFrames: List[StackFrameLua] = ensureLuaStack(0) {
     pushMainThread()
