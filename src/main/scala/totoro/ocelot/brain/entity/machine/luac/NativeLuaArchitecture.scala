@@ -68,54 +68,33 @@ class NativeLua53Architecture(machine: Machine) extends NativeLuaArchitecture(ma
     val absIndex = lua.absIndex(index)
     checkType(index, LuaType.NUMBER)
 
-    lua.getGlobal("math") // stack: math
-    lua.getField(-1, "type") // stack: math.type math
-    lua.pushValue(absIndex) // stack: <number> math.type math
-    lua.call(1, 1) // stack: <number type> math
-    val numberType = transformString(-1).toUtf8String
-    lua.pop(2) // stack restored
+    lua.load(
+      """
+        |local number = ...
+        |
+        |if math.type(number) == "integer" then
+        |  return true, number >> 32, number & ((1 << 32) - 1)
+        |end
+        |
+        |return false
+        |""".stripMargin,
+      "=number transformer"
+    ) // stack: <chunk>
+    lua.pushValue(absIndex) // stack: <integer> <chunk>
+    lua.call(1, 3) // stack: [<number[31:0]> <number[63:32]> true | nil nil false]
 
-    LuaValue.Number(numberType match {
-      case "integer" =>
-        lua.pushNumber(0) // stack: 0
-        lua.pushValue(absIndex) // stack: <integer> 0
-        val neg = lua.compare(-1, -2, LuaState.RelOperator.LT)
+    val result = if (transformBoolean(-3).value) {
+      val highBits = lua.toNumber(-2).toLong
+      val lowBits = lua.toNumber(-1).toLong
 
-        if (neg) {
-          lua.arith(LuaState.ArithOperator.SUB) // stack: <|integer|>
-        } else {
-          lua.replace(-2) // stack: <|integer|>
-        }
+      LuaNumber.Integer((highBits << 32) | lowBits)
+    } else {
+      LuaNumber.Double(lua.toNumber(absIndex))
+    }
 
-        lua.pushValue(-1) // stack: <|integer|> <|integer|>
-        lua.pushNumber(0x1_0000_0000L) // stack: 0x1_0000_0000 <|integer|> <|integer|>
+    lua.pop(3)
 
-        // don't worry (though you probably should, nevermind)
-        // Lua 5.3 has changed the order of the operators so it no longer
-        // corresponds to that defined in the wrapper
-        // (LuaState.ArithOperator)
-        // in particular, .UNM is actually integer division (//) and
-        // .DIV is the remainder operation (%)
-        lua.arith(LuaState.ArithOperator.DIV) // stack: <|integer|[31:0]> <|integer|>
-        val numberLow = lua.toNumber(-1).toLong
-
-        lua.arith(LuaState.ArithOperator.SUB) // stack: <|integer| - |integer|[31:0]>
-        lua.pushNumber(0x1_0000_0000L) // stack: 0x1_0000_0000 <|integer| - |integer|[31:0]>
-        lua.arith(LuaState.ArithOperator.UNM) // stack: <|integer|[63:32]>
-        val numberHigh = lua.toNumber(-1).toLong
-        lua.pop(1) // stack restored
-
-        val absoluteValue = (numberHigh << 32) | numberLow
-        assert(absoluteValue >= 0)
-
-        LuaNumber.Integer(if (neg) {
-          -absoluteValue
-        } else {
-          absoluteValue
-        })
-
-      case "float" => LuaNumber.Double(lua.toNumber(index))
-    })
+    LuaValue.Number(result)
   }
 }
 
@@ -535,7 +514,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   protected def checkType(index: Int, expected: LuaType): Unit = {
     val `type` = lua.`type`(index)
 
-    assert(`type` == expected, s"invalid value: expected $expected, got ${`type`}: ${transformValue(index)}")
+    assert(`type` == expected, s"invalid value: expected $expected, got ${`type`}")
   }
 
   protected def ensureLuaStack[T](delta: Int)(f: => T): T = {

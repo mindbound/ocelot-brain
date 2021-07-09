@@ -4,7 +4,7 @@ import java.nio.file.Files
 import totoro.ocelot.brain.Ocelot
 import totoro.ocelot.brain.entity.traits.{Entity, Environment}
 import totoro.ocelot.brain.entity.{CPU, Case, GraphicsCard, HDDManaged, Memory, Redstone, Screen}
-import totoro.ocelot.brain.entity.machine.luac.StackFrameLua
+import totoro.ocelot.brain.entity.machine.luac.{NativeLua53Architecture, StackFrameLua}
 import totoro.ocelot.brain.entity.machine.debug.Debuggable
 import totoro.ocelot.brain.event._
 import totoro.ocelot.brain.loot.Loot
@@ -45,6 +45,7 @@ object Demo extends App {
     * because they are added to the Case internal inventory (and the case is added to the workspace).
     */
   val cpu = new CPU(Tier.Three)
+  cpu.setArchitecture(classOf[NativeLua53Architecture])
   computer.add(cpu)
 
   val gpu = new GraphicsCard(Tier.Three)
