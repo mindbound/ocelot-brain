@@ -217,12 +217,16 @@ object Demo extends App {
 
     println("Stack frames retrieved:")
     frames.foreach {
-      case f: StackFrameLua =>
+      case StackFrameLua(f, params, locals, upvalues) =>
         println(
-          s"\t${f.index}: name = ${f.name}, nameWhat = ${f.nameWhat}, what = ${f.what}, source = ${f.source}, " +
+          s"\tname = ${f.name}, nameWhat = ${f.nameWhat}, what = ${f.what}, source = ${f.source}, " +
             s"current line = ${f.currentLine}, lines = ${f.lines}, ups = ${f.upvalueCount}, params = ${f.paramCount}, " +
             s"is vararg = ${f.vararg}, is tail call = ${f.tailCall}, short source = ${f.shortSource}"
         )
+
+        upvalues.foreach(uv => println(s"\t\tupvalue #${uv.id} ${uv.name} = ${uv.value}"))
+        params.foreach(p => println(s"\t\tparam ${p.name} = ${p.value}"))
+        locals.foreach(l => println(s"\t\tlocal ${l.name} = ${l.value}"))
       case _ => println("\t¯\\_(ツ)_/¯")
     }
 
