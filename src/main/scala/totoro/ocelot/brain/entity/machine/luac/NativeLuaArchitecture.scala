@@ -231,6 +231,16 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       case _ => 0
     })).toInt max 0 min Settings.get.maxTotalRam
 
+  override def freeMemory: Int = {
+    // This is *very* unlikely, but still: avoid this getting larger than
+    // what we report as the total memory.
+    ((lua.getFreeMemory min (lua.getTotalMemory - kernelMemory)) / ramScale).toInt
+  }
+
+  override def totalMemory: Int = {
+    ((lua.getTotalMemory - kernelMemory) / ramScale).toInt
+  }
+
   // ----------------------------------------------------------------------- //
 
   override def runSynchronized() {

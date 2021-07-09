@@ -97,6 +97,10 @@ class LuaJLuaArchitecture(val machine: Machine) extends Architecture {
       case _ => 0
     })).toInt max 0 min Settings.get.maxTotalRam
 
+  override def freeMemory: Int = memory / 2
+
+  override def totalMemory: Int = memory
+
   // ----------------------------------------------------------------------- //
 
   override def runSynchronized() {

@@ -1,8 +1,5 @@
 package totoro.ocelot.brain.entity.machine
 
-import java.util
-import java.util.concurrent.TimeUnit
-
 import totoro.ocelot.brain.entity.fs.{FileSystem, FileSystemAPI}
 import totoro.ocelot.brain.entity.machine.Callbacks.InnerCallback
 import totoro.ocelot.brain.entity.traits.{CallBudget, DeviceInfo, DiskActivityAware, Environment, MachineHost, Processor}
@@ -15,6 +12,9 @@ import totoro.ocelot.brain.util.ResultWrapper.result
 import totoro.ocelot.brain.workspace.Workspace
 import totoro.ocelot.brain.{Ocelot, Settings}
 
+import java.util
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 
@@ -70,6 +70,11 @@ class Machine(val host: MachineHost) extends Environment with Context with Runna
   private var message: Option[String] = None // For error messages.
 
   private val maxSignalQueueSize = Settings.get.maxSignalQueueSize
+
+  private val _latestInfo = new AtomicReference[LatestInfo](LatestInfo(0, 0, 0, 0, 0, 0))
+
+  private case class LatestInfo(executionStart: Long, executionEnd: Long, freeMemory: Int, totalMemory: Int,
+                                callBudget: Double, maxCallBudget: Double)
 
   // ----------------------------------------------------------------------- //
 
@@ -134,6 +139,21 @@ class Machine(val host: MachineHost) extends Environment with Context with Runna
   }
 
   def cpuTime: Double = (cpuTotal + (System.nanoTime() - cpuStart)) * 10e-10
+
+  def latestMemoryUsage: (Int, Int) = {
+    val info = _latestInfo.get()
+    (info.freeMemory, info.totalMemory)
+  }
+
+  def latestExecutionInfo: (Long, Long) = {
+    val info = _latestInfo.get()
+    (info.executionStart, info.executionEnd)
+  }
+
+  def latestCallBudget: (Double, Double) = {
+    val info = _latestInfo.get()
+    (info.callBudget, info.maxCallBudget)
+  }
 
   // ----------------------------------------------------------------------- //
 
@@ -881,6 +901,7 @@ class Machine(val host: MachineHost) extends Environment with Context with Runna
     }
 
     cpuStart = System.nanoTime()
+    _latestInfo.getAndUpdate(info => info.copy(executionStart = cpuStart))
 
     try {
       val result = architecture.runThreaded(isSynchronizedReturn)
@@ -949,6 +970,14 @@ class Machine(val host: MachineHost) extends Environment with Context with Runna
         Ocelot.log.warn("Architecture's runThreaded threw an error. This should never happen!", e)
         crash("Error.InternalError")
     }
+
+    _latestInfo.getAndUpdate(info => info.copy(
+      freeMemory = architecture.freeMemory,
+      totalMemory = architecture.totalMemory,
+      executionEnd = System.nanoTime(),
+      callBudget = callBudget,
+      maxCallBudget = maxCallBudget
+    ))
 
     // Keep track of time spent executing the computer.
     cpuTotal += System.nanoTime() - cpuStart

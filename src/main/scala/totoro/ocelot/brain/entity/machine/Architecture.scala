@@ -40,6 +40,10 @@ trait Architecture {
     */
   def recomputeMemory(components: Iterable[Entity]): Boolean
 
+  def freeMemory: Int
+
+  def totalMemory: Int
+
   /**
     * Called when a machine starts up. Used to (re-)initialize the underlying
     * architecture logic. For example, for Lua this creates a new Lua state.

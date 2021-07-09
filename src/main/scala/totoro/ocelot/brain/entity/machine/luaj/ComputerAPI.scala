@@ -23,9 +23,9 @@ class ComputerAPI(owner: LuaJLuaArchitecture) extends LuaJAPI(owner) {
       case _ => LuaValue.NIL
     })
 
-    computer.set("freeMemory", (_: Varargs) => LuaValue.valueOf(owner.memory / 2))
+    computer.set("freeMemory", (_: Varargs) => LuaValue.valueOf(owner.freeMemory))
 
-    computer.set("totalMemory", (_: Varargs) => LuaValue.valueOf(owner.memory))
+    computer.set("totalMemory", (_: Varargs) => LuaValue.valueOf(owner.totalMemory))
 
     computer.set("pushSignal", (args: Varargs) => LuaValue.valueOf(machine.signal(args.checkjstring(1), toSimpleJavaObjects(args, 2): _*)))
 
