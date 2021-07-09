@@ -263,7 +263,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       // Resume the Lua state and remember the number of results we get.
       val results = if (isSynchronizedReturn) {
         // If we were doing a synchronized call, continue where we left off.
-        assert(lua.getTop == 2)
+        assert(lua.getTop == 2, s"stack length (${lua.getTop}) != 2")
         assert(lua.isTable(2))
         lua.resume(1, 1)
       }
@@ -530,25 +530,29 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     result
   }
 
-  private def pushGlobalEnvironment(): Unit = {
+  private def pushGlobalEnvironment(): Unit = ensureLuaStack(1) {
     lua.rawGet(getRegistryIndex, LuaState.RIDX_GLOBALS)
   }
 
-  private def pushMainThread(): Unit = {
-    lua.pushInteger(LuaState.RIDX_MAINTHREAD)
-    lua.getTable(getRegistryIndex)
+  private def pushMainThread(): Unit = ensureLuaStack(1) {
+    // Here "the main thread" means the one that is created in `initialize`.
+    // Not to be confused with the actual main thread, a reference to which is kept in the registry.
+    // The latter is useless because it doesn't reference anything from the former thread.
+    lua.pushValue(1)
+    checkType(-1, LuaType.THREAD)
   }
 
-  private def callDebugFunction(funcName: String, paramCount: Int, resultCount: Int): Unit = {
-    pushGlobalEnvironment() // stack: <env> params...
-    lua.getField(-1, "debug") // stack: debug <env> params...
-    lua.remove(-2) // stack: debug params...
-    lua.getField(-1, funcName) // stack: debug[funcName] debug params...
-    checkType(-1, LuaType.FUNCTION)
-    lua.remove(-2) // stack: debug[funcName] params...
-    lua.insert(-paramCount - 1) // stack: params... debug[funcName]
-    lua.call(paramCount, resultCount) // stack: results...
-  }
+  private def callDebugFunction(funcName: String, paramCount: Int, resultCount: Int): Unit =
+    ensureLuaStack(resultCount - paramCount) {
+      pushGlobalEnvironment() // stack: <env> params...
+      lua.getField(-1, "debug") // stack: debug <env> params...
+      lua.remove(-2) // stack: debug params...
+      lua.getField(-1, funcName) // stack: debug[funcName] debug params...
+      checkType(-1, LuaType.FUNCTION)
+      lua.remove(-2) // stack: debug[funcName] params...
+      lua.insert(-paramCount - 1) // stack: params... debug[funcName]
+      lua.call(paramCount, resultCount) // stack: results...
+    }
 
   protected def transformNumber(index: Int): LuaValue.Number
 
@@ -796,7 +800,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     result
   }
 
-  private def getStackFrameInfo(coroutineIndex: Int, frameIndex: Int): Option[StackFrameLua.Info] = {
+  private def getStackFrameInfo(coroutineIndex: Int, frameIndex: Int): Option[StackFrameLua.Info] = ensureLuaStack(0) {
     checkType(coroutineIndex, LuaType.THREAD)
     lua.pushValue(coroutineIndex) // stack: <thread>
     lua.pushNumber(frameIndex) // stack: <frameIndex> <thread>
