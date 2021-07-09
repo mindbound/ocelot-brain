@@ -2,6 +2,15 @@ package totoro.ocelot.brain.entity.machine.luac
 
 import java.nio.charset.StandardCharsets
 
+sealed abstract class LuaThreadState
+
+object LuaThreadState {
+  case class Running() extends LuaThreadState
+  case class Suspended() extends LuaThreadState
+  case class Normal() extends LuaThreadState
+  case class Dead() extends LuaThreadState
+}
+
 sealed abstract class LuaNumber {
   def toLong: Long
 
@@ -39,7 +48,7 @@ object LuaValue {
 
   case class Userdata(address: Long) extends LuaValue
 
-  case class Thread(address: Long) extends LuaValue
+  case class Thread(address: Long, state: LuaThreadState, frames: List[StackFrameLua]) extends LuaValue
 
-  case class Table(value: Map[LuaValue, LuaValue]) extends LuaValue
+  case class Table(address: Long, value: Map[LuaValue, LuaValue]) extends LuaValue
 }

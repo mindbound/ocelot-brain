@@ -607,7 +607,24 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   protected def transformThread(index: Int): LuaValue.Thread = ensureLuaStack(0) {
     checkType(index, LuaType.THREAD)
 
-    LuaValue.Thread(lua.toPointer(index))
+    val absIndex = lua.absIndex(index)
+
+    pushGlobalEnvironment() // stack: _G
+    lua.getField(-1, "coroutine") // stack: coroutine _G
+    lua.getField(-1, "status") // stack: coroutine.status coroutine _G
+    lua.pushValue(absIndex) // stack: <thread> coroutine.status coroutine _G
+    lua.call(1, 1) // stack: <status> coroutine _G
+
+    val state = transformString(-1).toUtf8String match {
+      case "running" => LuaThreadState.Running()
+      case "suspended" => LuaThreadState.Suspended()
+      case "normal" => LuaThreadState.Normal()
+      case "dead" => LuaThreadState.Dead()
+    }
+
+    lua.pop(3) // stack restored
+
+    LuaValue.Thread(lua.toPointer(index), state, getThreadStackFrames(absIndex))
   }
 
   protected def transformTable(index: Int): LuaValue.Table = ensureLuaStack(0) {
@@ -616,13 +633,16 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     val absoluteIndex = lua.absIndex(index)
     lua.pushNil()
 
-    LuaValue.Table(Iterator.continually(lua.next(absoluteIndex)).takeWhile(identity).map(_ => {
-      val key = transformValue(-2).get
-      val value = transformValue(-1).get
-      lua.pop(1)
+    LuaValue.Table(
+      lua.toPointer(absoluteIndex),
+      Iterator.continually(lua.next(absoluteIndex)).takeWhile(identity).map(_ => {
+        val key = transformValue(-2).get
+        val value = transformValue(-1).get
+        lua.pop(1)
 
-      (key, value)
-    }).toMap)
+        (key, value)
+      }).toMap
+    )
   }
 
   protected def transformValue(index: Int): Option[LuaValue] = ensureLuaStack(0) {
@@ -802,6 +822,9 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       lua.getField(-1, "func") // stack: <f> {func = <f>}
       lua.replace(-2) // stack: <f>
 
+      // TODO: I'm not sure if we're always going to get a function here — investigate
+      checkType(-1, LuaType.FUNCTION)
+
       val result = LazyList.from(1).map(ensureLuaStack(0) { uvIndex: Int =>
         lua.pushValue(-1) // stack: <f> <f>
         lua.pushNumber(uvIndex) // stack: <uvIndex> <f> <f>
@@ -846,9 +869,13 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     )}
   }
 
+  private def getThreadStackFrames(coroutineIndex: Int) = ensureLuaStack(0) {
+    LazyList.from(0).map(getStackFrame(coroutineIndex)).takeWhile(_.nonEmpty).flatten.toList
+  }
+
   def getStackFrames: List[StackFrameLua] = ensureLuaStack(0) {
     pushMainThread()
-    val result = LazyList.from(0).map(getStackFrame(-1)).takeWhile(_.nonEmpty).flatten.toList
+    val result = getThreadStackFrames(-1)
     lua.pop(1)
 
     result
