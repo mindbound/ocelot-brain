@@ -263,7 +263,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       // Resume the Lua state and remember the number of results we get.
       val results = if (isSynchronizedReturn) {
         // If we were doing a synchronized call, continue where we left off.
-        assert(lua.getTop == 2, s"stack length (${lua.getTop}) != 2")
+        assert(lua.getTop == 2)
         assert(lua.isTable(2))
         lua.resume(1, 1)
       }
