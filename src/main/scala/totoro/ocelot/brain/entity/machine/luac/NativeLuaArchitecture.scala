@@ -116,6 +116,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     new SystemAPI(this),
     new UnicodeAPI(this),
     new UserdataAPI(this),
+    new OcelotAPI(this),
     // Persistence has to go last to ensure all other APIs can go into the permanent value table.
     persistence)
 
@@ -519,6 +520,19 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   // ----------------------------------------------------------------------- //
   // debug interface follows from now on -- an Ocelot extension
 
+  val trapLock = new Object
+  private[luac] var trapRequested = false
+
+  override def break(): Unit = trapLock.synchronized {
+    trapRequested = true
+  }
+
+  override def resume(): Unit = trapLock.synchronized {
+    trapRequested = false
+
+    trapLock.notifyAll()
+  }
+
   protected def getRegistryIndex: Int
 
   protected def checkType(index: Int, expected: LuaType): Unit = {
@@ -528,8 +542,17 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   }
 
   protected def ensureLuaStack[T](delta: Int)(f: => T): T = {
+    if (lua == null) {
+      return f
+    }
+
     val expectedStackLevel = lua.getTop + delta
     val result = f
+
+    if (lua == null) {
+      return result
+    }
+
     val actualStackLevel = lua.getTop
 
     assert(
@@ -892,6 +915,10 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     (new LuaTransformer).getThreadStackFrames(coroutineIndex)
 
   def getStackFrames: List[StackFrameLua] = ensureLuaStack(0) {
+    if (lua == null) {
+      return List.empty
+    }
+
     pushMainThread()
     val result = getThreadStackFrames(-1)
     lua.pop(1)

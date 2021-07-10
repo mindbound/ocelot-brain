@@ -42,9 +42,12 @@ if hookInterval < 1000 then hookInterval = 1000 end
 local deadline = math.huge
 local hitDeadline = false
 local tooLongWithoutYielding = setmetatable({},  { __tostring = function() return "too long without yielding" end})
+
+local setSandboxHook -- part of the debug interface -- an Ocelot extension
+
 local function checkDeadline()
   if computer.realTime() > deadline then
-    debug.sethook(coroutine.running(), checkDeadline, "", 1)
+    setSandboxHook(coroutine.running(), "deadline")
     if not hitDeadline then
       deadline = deadline + 0.5
     end
@@ -58,6 +61,41 @@ local function pcallTimeoutCheck(...)
     return ok, tostring(tooLongWithoutYielding)
   end
   return ...
+end
+
+-------------------------------------------------------------------------------
+-- The debug interface -- an Ocelot extension
+
+if ocelot then
+  local function debugHook()
+    local remainingUntilDeadline = deadline - computer.realTime()
+    ocelot.trap()
+    deadline = computer.realTime() + remainingUntilDeadline
+
+    setSandboxHook(coroutine.running(), true)
+  end
+
+  function setSandboxHook(co, mode)
+    if mode and ocelot.isTrapRequested() then
+      debug.sethook(co, debugHook, "l")
+    elseif mode == "deadline" then
+      debug.sethook(co, checkDeadline, "", 1)
+    elseif mode then
+      debug.sethook(co, checkDeadline, "", hookInterval)
+    else
+      debug.sethook(co)
+    end
+  end
+else
+  function setSandboxHook(co, mode)
+    if mode == "deadline" then
+      debug.sethook(co, checkDeadline, "", 1)
+    elseif mode then
+      debug.sethook(co, checkDeadline, "", hookInterval)
+    else
+      debug.sethook(co)
+    end
+  end
 end
 
 -------------------------------------------------------------------------------
@@ -701,10 +739,10 @@ local function sgc(self)
   if not sgcco then
     sgcco = coroutine.create(sgcf)
   end
-  debug.sethook(sgcco, checkDeadline, "", hookInterval)
+  setSandboxHook(sgcco, true)
   deadline, hitDeadline = math.min(oldDeadline, computer.realTime() + 0.5), true
   local _, result, reason = coroutine.resume(sgcco, self, gc)
-  debug.sethook(sgcco)
+  setSandboxHook(sgcco)
   if coroutine.status(sgcco) == "dead" then
     sgcco = nil
   end
@@ -817,10 +855,10 @@ sandbox = {
       checkArg(1, co, "thread")
       local args = table.pack(...)
       while true do -- for consecutive sysyields
-        debug.sethook(co, checkDeadline, "", hookInterval)
+        setSandboxHook(co, true)
         local result = table.pack(
           coroutine.resume(co, table.unpack(args, 1, args.n)))
-        debug.sethook(co) -- avoid gc issues
+        setSandboxHook(co) -- avoid gc issues
         checkDeadline()
         if result[1] then -- success: (true, sysval?, ...?)
           if coroutine.status(co) == "dead" then -- return: (true, ...)
@@ -1498,7 +1536,7 @@ local function main()
       end
     end
 
-    debug.sethook(co, checkDeadline, "", hookInterval)
+    setSandboxHook(co, true)
     local result = table.pack(coroutine.resume(co, table.unpack(args, 1, args.n)))
     args = nil -- clear upvalue, avoids trying to persist it
     if not result[1] then
