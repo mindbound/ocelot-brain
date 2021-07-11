@@ -1,5 +1,6 @@
 package totoro.ocelot.brain.entity.machine.luac
 
+import li.cil.repack.com.naef.jnlua.LuaType
 import totoro.ocelot.brain.Ocelot
 import totoro.ocelot.brain.entity.machine.ExtendedLuaState.extendLuaState
 
@@ -7,10 +8,16 @@ class OcelotAPI(owner: NativeLuaArchitecture) extends NativeLuaAPI(owner) {
   def initialize(): Unit = {
     lua.newTable(0, 2)
 
-    lua.pushScalaFunction(_ => {
+    lua.pushScalaFunction(lua => {
+      lua.checkType(1, LuaType.THREAD)
+
       owner.trapLock.synchronized {
-        while (owner.trapRequested) {
-          owner.trapLock.wait()
+        if (owner.debugEnabled) {
+          owner.fetchSnapshot()
+
+          while (owner.trapRequested) {
+            owner.trapLock.wait()
+          }
         }
       }
 
@@ -26,11 +33,11 @@ class OcelotAPI(owner: NativeLuaArchitecture) extends NativeLuaAPI(owner) {
     lua.setField(-2, "version")
 
     lua.pushScalaFunction(lua => owner.trapLock.synchronized {
-      lua.pushBoolean(owner.trapRequested)
+      lua.pushBoolean(owner.debugEnabled)
 
       1
     })
-    lua.setField(-2, "isTrapRequested")
+    lua.setField(-2, "isDebugEnabled")
 
     lua.setGlobal("ocelot")
   }

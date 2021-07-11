@@ -10,6 +10,8 @@ import totoro.ocelot.brain.entity.traits.{Entity, Memory}
 import totoro.ocelot.brain.nbt.NBTTagCompound
 import totoro.ocelot.brain.{Ocelot, Settings}
 
+import java.util.concurrent.atomic.AtomicReference
+
 abstract class StackFrameLuaWhat
 
 object StackFrameLuaWhat {
@@ -518,12 +520,20 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   }
 
   // ----------------------------------------------------------------------- //
-  // debug interface follows from now on -- an Ocelot extension
+  // The debug interface follows from now on -- an Ocelot extension
 
-  val trapLock = new Object
+  private[luac] val trapLock = new Object
   private[luac] var trapRequested = false
+  private[luac] var debugEnabled = false
+  private val snapshot: AtomicReference[Option[List[StackFrameLua]]] = new AtomicReference(None)
+
+  override def setDebugEnabled(enabled: Boolean): Unit = trapLock.synchronized {
+    debugEnabled = enabled
+    trapRequested = trapRequested && enabled
+  }
 
   override def break(): Unit = trapLock.synchronized {
+    setDebugEnabled(true)
     trapRequested = true
   }
 
@@ -568,10 +578,17 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   }
 
   private def pushMainThread(): Unit = ensureLuaStack(1) {
-    // Here "the main thread" means the one that is created in `initialize`.
-    // Not to be confused with the actual main thread, a reference to which is kept in the registry.
-    // The latter is useless because it doesn't reference anything from the former thread.
-    lua.pushValue(1)
+    if (lua.getTop >= 1) {
+      // Here "the main thread" means the one that is created in `initialize`.
+      // Not to be confused with the actual main thread, a reference to which is kept in the registry.
+      // The latter is useless because it doesn't reference anything from the former thread.
+      lua.pushValue(1)
+    } else {
+      // If this method is called waaaaaay too early, "the main thread" may not have been created yet.
+      // In this case we default to the actual main thread.
+      lua.rawGet(getRegistryIndex, LuaState.RIDX_MAINTHREAD)
+    }
+
     checkType(-1, LuaType.THREAD)
   }
 
@@ -914,16 +931,18 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   private def getThreadStackFrames(coroutineIndex: Int): List[StackFrameLua] =
     (new LuaTransformer).getThreadStackFrames(coroutineIndex)
 
-  def getStackFrames: List[StackFrameLua] = ensureLuaStack(0) {
+  private[luac] def fetchSnapshot(): Unit = ensureLuaStack(0) {
     if (lua == null) {
-      return List.empty
+      snapshot.set(None)
     }
 
     pushMainThread()
     val result = getThreadStackFrames(-1)
     lua.pop(1)
 
-    result
+    snapshot.set(Some(result))
   }
+
+  def getStackFrames: Option[List[StackFrameLua]] = snapshot.get()
 
 }

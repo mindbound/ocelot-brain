@@ -209,29 +209,35 @@ object Demo extends App {
 
   if (computer != null) println("Successfully loaded the snapshot. Continuing the execution...")
 
+  computer.machine.architecture match {
+    case arch: Debuggable => arch.setDebugEnabled(true)
+    case _ =>
+  }
+
   while (loadedWorkspace.getIngameTime < 100) {
     loadedWorkspace.update()
 
-    computer.machine.synchronized {
-      val frames = computer.machine.architecture match {
-        case arch: Debuggable => arch.getStackFrames
-        case _ => List.empty
-      }
+    val frames = computer.machine.architecture match {
+      case arch: Debuggable => arch.getStackFrames
+      case _ => List.empty
+    }
 
-      println("Stack frames retrieved:")
-      frames.foreach {
-        case StackFrameLua(f, params, locals, upvalues) =>
-          println(
-            s"\tname = ${f.name}, nameWhat = ${f.nameWhat}, what = ${f.what}, source = ${f.source}, " +
-              s"current line = ${f.currentLine}, lines = ${f.lines}, ups = ${f.upvalueCount}, params = ${f.paramCount}, " +
-              s"is vararg = ${f.vararg}, is tail call = ${f.tailCall}, short source = ${f.shortSource}"
-          )
+    frames match {
+      case Some(frames) =>
+        println("Stack frames retrieved:")
+        frames.foreach {
+          case StackFrameLua(f, params, locals, upvalues) =>
+            println(
+              s"\tname = ${f.name}, nameWhat = ${f.nameWhat}, what = ${f.what}, source = ${f.source}, " +
+                s"current line = ${f.currentLine}, lines = ${f.lines}, ups = ${f.upvalueCount}, params = ${f.paramCount}, " +
+                s"is vararg = ${f.vararg}, is tail call = ${f.tailCall}, short source = ${f.shortSource}"
+            )
 
-          upvalues.foreach(uv => println(s"\t\tupvalue #${uv.id} ${uv.name} = ${uv.value}"))
-          params.foreach(p => println(s"\t\tparam ${p.name} = ${p.value}"))
-          locals.foreach(l => println(s"\t\tlocal ${l.name} = ${l.value}"))
-        case _ => println("\t¯\\_(ツ)_/¯")
-      }
+            upvalues.foreach(uv => println(s"\t\tupvalue #${uv.id} ${uv.name} = ${uv.value}"))
+            params.foreach(p => println(s"\t\tparam ${p.name} = ${p.value}"))
+            locals.foreach(l => println(s"\t\tlocal ${l.name} = ${l.value}"))
+        }
+      case None => println("Stack frame info is unavailable")
     }
 
     Thread.sleep(50)

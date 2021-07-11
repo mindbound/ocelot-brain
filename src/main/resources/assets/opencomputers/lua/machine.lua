@@ -67,16 +67,18 @@ end
 -- The debug interface -- an Ocelot extension
 
 if ocelot then
+  local machineCoroutine = coroutine.running()
+
   local function debugHook()
     local remainingUntilDeadline = deadline - computer.realTime()
-    ocelot.trap()
+    ocelot.trap(machineCoroutine)
     deadline = computer.realTime() + remainingUntilDeadline
 
     setSandboxHook(coroutine.running(), true)
   end
 
   function setSandboxHook(co, mode)
-    if mode and ocelot.isTrapRequested() then
+    if mode and ocelot.isDebugEnabled() then
       debug.sethook(co, debugHook, "l")
     elseif mode == "deadline" then
       debug.sethook(co, checkDeadline, "", 1)
