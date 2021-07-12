@@ -1,10 +1,12 @@
 package totoro.ocelot.brain.entity.machine.luac
 
 import li.cil.repack.com.naef.jnlua.LuaType
-import totoro.ocelot.brain.Ocelot
+import totoro.ocelot.brain.{Ocelot, Settings}
 import totoro.ocelot.brain.entity.machine.ExtendedLuaState.extendLuaState
 
 class OcelotAPI(owner: NativeLuaArchitecture) extends NativeLuaAPI(owner) {
+  private var lastSnapshotTime: Long = 0
+
   def initialize(): Unit = {
     lua.newTable(0, 2)
 
@@ -12,12 +14,14 @@ class OcelotAPI(owner: NativeLuaArchitecture) extends NativeLuaAPI(owner) {
       lua.checkType(1, LuaType.THREAD)
 
       owner.trapLock.synchronized {
-        if (owner.debugEnabled) {
+        if (owner.trapRequested ||
+            (owner.debugEnabled && System.currentTimeMillis() - lastSnapshotTime > Settings.debugSnapshotIntervalMs)) {
           owner.fetchSnapshot()
+          lastSnapshotTime = System.currentTimeMillis()
+        }
 
-          while (owner.trapRequested) {
-            owner.trapLock.wait()
-          }
+        while (owner.trapRequested) {
+          owner.trapLock.wait()
         }
       }
 
