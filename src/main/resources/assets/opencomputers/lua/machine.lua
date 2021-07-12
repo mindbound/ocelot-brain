@@ -66,17 +66,24 @@ end
 -------------------------------------------------------------------------------
 -- The debug interface -- an Ocelot extension
 
+local trap
+
 if ocelot then
   local machineCoroutine = coroutine.running()
 
-  local function debugHook()
+  local function debugHook(event)
+    trap()
+    setSandboxHook(coroutine.running(), true)
+
+    if event == "count" then
+      return checkDeadline()
+    end
+  end
+
+  function trap()
     local remainingUntilDeadline = deadline - computer.realTime()
     ocelot.trap(machineCoroutine)
     deadline = computer.realTime() + remainingUntilDeadline
-
-    setSandboxHook(coroutine.running(), true)
-
-    return checkDeadline()
   end
 
   function setSandboxHook(co, mode)
@@ -91,6 +98,8 @@ if ocelot then
     end
   end
 else
+  function trap() end
+
   function setSandboxHook(co, mode)
     if mode == "deadline" then
       debug.sethook(co, checkDeadline, "", 1)
@@ -1110,6 +1119,7 @@ local function invoke(target, direct, ...)
       result = wrapUserdata(result)
       return result
     end))
+    trap()
   end
   return processResult(result)
 end
@@ -1417,6 +1427,7 @@ local libcomputer = {
   end,
 
   shutdown = function(reboot)
+    trap()
     coroutine.yield(not not reboot)
   end,
   pushSignal = function(...)
@@ -1428,9 +1439,12 @@ local libcomputer = {
     repeat
       local signal = table.pack(coroutine.yield(deadline - computer.uptime()))
       if signal.n > 0 then
+        trap()
         return table.unpack(signal, 1, signal.n)
       end
     until computer.uptime() >= deadline
+
+    trap()
   end,
 
   beep = function(...)
