@@ -792,7 +792,15 @@ sandbox = {
     if not system.allowBytecode() then
       mode = "t"
     end
-    return load(ld, source, mode, env or sandbox)
+    
+    local result = table.pack(load(ld, source, mode, env or sandbox))
+
+    -- TODO: type(ld) == "function"
+    if result[1] and ocelot and type(ld) == "string" then
+      ocelot.registerSource(result[1], ld)
+    end
+
+    return table.unpack(result, 1, result.n)
   end,
   loadfile = nil, -- in boot/*_base.lua
   next = next,

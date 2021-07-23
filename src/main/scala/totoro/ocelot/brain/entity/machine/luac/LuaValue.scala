@@ -35,7 +35,7 @@ object LuaValue {
     def toUtf8String: scala.Predef.String = new scala.Predef.String(value.toArray, StandardCharsets.UTF_8)
   }
 
-  case class Function(address: Long) extends LuaValue
+  case class Function(address: Long, source: Option[List[Byte]]) extends LuaValue
 
   case class Userdata(address: Long) extends LuaValue
 

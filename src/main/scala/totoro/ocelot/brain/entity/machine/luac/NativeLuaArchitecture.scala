@@ -11,6 +11,7 @@ import totoro.ocelot.brain.nbt.NBTTagCompound
 import totoro.ocelot.brain.{Ocelot, Settings}
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.collection.mutable
 
 object LuaStackFrame {
   case class Info(nameWhat: Option[String],
@@ -23,7 +24,8 @@ object LuaStackFrame {
                   paramCount: Int,
                   vararg: Boolean,
                   tailCall: Boolean,
-                  shortSource: String)
+                  shortSource: String,
+                  function: LuaValue.Function)
 
   object Info {
     abstract class What
@@ -414,6 +416,9 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     }
     lua = null
     kernelMemory = 0
+
+    snapshot.set(None)
+    sourceRegistry.clear()
   }
 
   // ----------------------------------------------------------------------- //
@@ -529,6 +534,8 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   private[luac] var debugEnabled = false
   private val snapshot: AtomicReference[Option[List[LuaStackFrame]]] = new AtomicReference(None)
 
+  private val sourceRegistry: mutable.Map[Long, List[Byte]] = mutable.HashMap.empty
+
   override def setDebugEnabled(enabled: Boolean): Unit = trapLock.synchronized {
     debugEnabled = enabled
     trapRequested = trapRequested && enabled
@@ -544,6 +551,10 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     snapshot.set(None)
 
     trapLock.notifyAll()
+  }
+
+  private[luac] def registerSourceMapping(funcAddr: Long, source: List[Byte]): Unit = {
+    sourceRegistry += funcAddr -> source
   }
 
   protected def getRegistryIndex: Int
@@ -630,7 +641,9 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   protected def transformFunction(index: Int): LuaValue.Function = ensureLuaStack(0) {
     checkType(index, LuaType.FUNCTION)
 
-    LuaValue.Function(lua.toPointer(index))
+    val addr = lua.toPointer(index)
+
+    LuaValue.Function(addr, sourceRegistry.get(addr))
   }
 
   protected def transformUserdata(index: Int): LuaValue.Userdata = ensureLuaStack(0) {
@@ -863,7 +876,8 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
         "S" + // source, short_src, linedefined, lastlinedefined, what
         "l" + // currentline
         "t" + // istailcall
-        "u" // nups, nparams, isvararg
+        "u" + // nups, nparams, isvararg
+        "f" // func
 
     lua.pushString(debugInfoOptions) // stack: "nSltu" <frameIndex> <thread>
     callDebugFunction("getinfo", 3, 1) // stack: [nil | <stack frame>]
@@ -910,6 +924,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       val isVararg = transformField(transformBoolean, "isvararg")(-1).value
       val isTailCall = transformField(transformBoolean, "istailcall")(-1).value
       val shortSource = transformField(transformString, "short_src")(-1).toUtf8String
+      val function = transformField(transformFunction, "func")(-1)
 
       Some(LuaStackFrame.Info(
         name = name,
@@ -922,7 +937,8 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
         paramCount = paramCount.toInt,
         vararg = isVararg,
         tailCall = isTailCall,
-        shortSource = shortSource
+        shortSource = shortSource,
+        function = function,
       ))
     } else None
 

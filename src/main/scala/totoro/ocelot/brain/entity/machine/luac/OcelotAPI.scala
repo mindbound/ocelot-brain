@@ -43,6 +43,19 @@ class OcelotAPI(owner: NativeLuaArchitecture) extends NativeLuaAPI(owner) {
     })
     lua.setField(-2, "isDebugEnabled")
 
+    lua.pushScalaFunction(lua => {
+      lua.checkType(1, LuaType.FUNCTION)
+      lua.checkType(2, LuaType.STRING)
+
+      val funcAddr = lua.toPointer(1)
+      val source = lua.toByteArray(2).toList
+
+      owner.registerSourceMapping(funcAddr, source)
+
+      0
+    })
+    lua.setField(-2, "registerSource")
+
     lua.setGlobal("ocelot")
   }
 }
