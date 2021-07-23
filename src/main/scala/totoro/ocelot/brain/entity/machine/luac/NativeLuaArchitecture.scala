@@ -12,27 +12,11 @@ import totoro.ocelot.brain.{Ocelot, Settings}
 
 import java.util.concurrent.atomic.AtomicReference
 
-abstract class StackFrameLuaWhat
-
-object StackFrameLuaWhat {
-  case class Lua() extends StackFrameLuaWhat
-  case class C() extends StackFrameLuaWhat
-  case class Main() extends StackFrameLuaWhat
-}
-
-abstract class StackFrameLuaSource
-
-object StackFrameLuaSource {
-  case class File(name: scala.Predef.String) extends StackFrameLuaSource
-  case class String(code: List[Byte]) extends StackFrameLuaSource
-  case class Other(source: scala.Predef.String) extends StackFrameLuaSource
-}
-
-object StackFrameLua {
+object LuaStackFrame {
   case class Info(nameWhat: Option[String],
                   name: Option[String],
-                  what: StackFrameLuaWhat,
-                  source: StackFrameLuaSource,
+                  what: Info.What,
+                  source: Info.Source,
                   currentLine: Option[Long],
                   lines: Option[(Long, Long)],
                   upvalueCount: Int,
@@ -40,12 +24,30 @@ object StackFrameLua {
                   vararg: Boolean,
                   tailCall: Boolean,
                   shortSource: String)
+
+  object Info {
+    abstract class What
+
+    object What {
+      case class Lua() extends What
+      case class C() extends What
+      case class Main() extends What
+    }
+
+    abstract class Source
+
+    object Source {
+      case class File(name: scala.Predef.String) extends Source
+      case class String(code: List[Byte]) extends Source
+      case class Other(source: scala.Predef.String) extends Source
+    }
+  }
 }
 
 case class LuaLocal(name: String, value: LuaValue)
 case class LuaUpvalue(id: Long, name: String, value: LuaValue)
 
-case class StackFrameLua(info: StackFrameLua.Info,
+case class LuaStackFrame(info: LuaStackFrame.Info,
                          params: List[LuaLocal],
                          locals: List[LuaLocal],
                          upvalues: List[LuaUpvalue]) extends StackFrame
@@ -525,7 +527,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   private[luac] val trapLock = new Object
   private[luac] var trapRequested = false
   private[luac] var debugEnabled = false
-  private val snapshot: AtomicReference[Option[List[StackFrameLua]]] = new AtomicReference(None)
+  private val snapshot: AtomicReference[Option[List[LuaStackFrame]]] = new AtomicReference(None)
 
   override def setDebugEnabled(enabled: Boolean): Unit = trapLock.synchronized {
     debugEnabled = enabled
@@ -806,12 +808,12 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
         result
       }
 
-    def getThreadStackFrame(coroutineIndex: Int)(index: Int): Option[StackFrameLua] = ensureLuaStack(0) {
+    def getThreadStackFrame(coroutineIndex: Int)(index: Int): Option[LuaStackFrame] = ensureLuaStack(0) {
       if (lua == null) {
         return None
       }
 
-      getStackFrameInfo(coroutineIndex, index).map(info => StackFrameLua(
+      getStackFrameInfo(coroutineIndex, index).map(info => LuaStackFrame(
         info = info,
         params = getStackFrameParams(coroutineIndex, index),
         locals = getStackFrameLocals(coroutineIndex, index),
@@ -819,7 +821,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       ))
     }
 
-    def getThreadStackFrames(coroutineIndex: Int): List[StackFrameLua] = ensureLuaStack(0) {
+    def getThreadStackFrames(coroutineIndex: Int): List[LuaStackFrame] = ensureLuaStack(0) {
       LazyList.from(0).map(getThreadStackFrame(coroutineIndex)).takeWhile(_.nonEmpty).flatten.toList
     }
   }
@@ -850,7 +852,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     result
   }
 
-  private def getStackFrameInfo(coroutineIndex: Int, frameIndex: Int): Option[StackFrameLua.Info] = ensureLuaStack(0) {
+  private def getStackFrameInfo(coroutineIndex: Int, frameIndex: Int): Option[LuaStackFrame.Info] = ensureLuaStack(0) {
     checkType(coroutineIndex, LuaType.THREAD)
     lua.pushValue(coroutineIndex) // stack: <thread>
     lua.pushNumber(frameIndex) // stack: <frameIndex> <thread>
@@ -881,18 +883,18 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       val nameWhat = transformField(transformNillable(transformString), "namewhat")(-1).map(_.toUtf8String)
 
       val what = transformField(transformString, "what")(-1).toUtf8String match {
-        case "C" => StackFrameLuaWhat.C()
-        case "Lua" => StackFrameLuaWhat.Lua()
-        case "main" => StackFrameLuaWhat.Main()
+        case "C" => LuaStackFrame.Info.What.C()
+        case "Lua" => LuaStackFrame.Info.What.Lua()
+        case "main" => LuaStackFrame.Info.What.Main()
       }
 
       val source = {
         val sourceStr = transformField(transformString, "source")(-1).value
 
         sourceStr.headOption match {
-          case Some('@') => StackFrameLuaSource.File(LuaValue.String(sourceStr.tail).toUtf8String)
-          case Some('=') => StackFrameLuaSource.Other(LuaValue.String(sourceStr.tail).toUtf8String)
-          case _ => StackFrameLuaSource.String(sourceStr)
+          case Some('@') => LuaStackFrame.Info.Source.File(LuaValue.String(sourceStr.tail).toUtf8String)
+          case Some('=') => LuaStackFrame.Info.Source.Other(LuaValue.String(sourceStr.tail).toUtf8String)
+          case _ => LuaStackFrame.Info.Source.String(sourceStr)
         }
       }
 
@@ -908,7 +910,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       val isTailCall = transformField(transformBoolean, "istailcall")(-1).value
       val shortSource = transformField(transformString, "short_src")(-1).toUtf8String
 
-      Some(StackFrameLua.Info(
+      Some(LuaStackFrame.Info(
         name = name,
         nameWhat = nameWhat,
         what = what,
@@ -928,7 +930,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     result
   }
 
-  private def getThreadStackFrames(coroutineIndex: Int): List[StackFrameLua] =
+  private def getThreadStackFrames(coroutineIndex: Int): List[LuaStackFrame] =
     (new LuaTransformer).getThreadStackFrames(coroutineIndex)
 
   private[luac] def fetchSnapshot(): Unit = ensureLuaStack(0) {
@@ -943,6 +945,6 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     snapshot.set(Some(result))
   }
 
-  def getStackFrames: Option[List[StackFrameLua]] = snapshot.get()
+  def getStackFrames: Option[List[LuaStackFrame]] = snapshot.get()
 
 }

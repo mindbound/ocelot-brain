@@ -4,7 +4,7 @@ import java.nio.file.Files
 import totoro.ocelot.brain.Ocelot
 import totoro.ocelot.brain.entity.traits.{Entity, Environment}
 import totoro.ocelot.brain.entity.{CPU, Case, GraphicsCard, HDDManaged, Memory, Redstone, Screen}
-import totoro.ocelot.brain.entity.machine.luac.{NativeLua53Architecture, StackFrameLua}
+import totoro.ocelot.brain.entity.machine.luac.{NativeLua53Architecture, LuaStackFrame}
 import totoro.ocelot.brain.entity.machine.debug.Debuggable
 import totoro.ocelot.brain.event._
 import totoro.ocelot.brain.loot.Loot
@@ -226,7 +226,7 @@ object Demo extends App {
       case Some(frames) =>
         println("Stack frames retrieved:")
         frames.foreach {
-          case StackFrameLua(f, params, locals, upvalues) =>
+          case LuaStackFrame(f, params, locals, upvalues) =>
             println(
               s"\tname = ${f.name}, nameWhat = ${f.nameWhat}, what = ${f.what}, source = ${f.source}, " +
                 s"current line = ${f.currentLine}, lines = ${f.lines}, ups = ${f.upvalueCount}, params = ${f.paramCount}, " +

@@ -53,7 +53,7 @@ object LuaValue {
 
     case class Recursion(override val address: Long, override val state: State) extends Thread(address, state)
 
-    case class Owned(override val address: Long, override val state: State, stack: List[StackFrameLua])
+    case class Owned(override val address: Long, override val state: State, stack: List[LuaStackFrame])
       extends Thread(address, state)
   }
 
