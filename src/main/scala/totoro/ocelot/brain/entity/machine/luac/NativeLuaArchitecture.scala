@@ -541,6 +541,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
 
   override def resume(): Unit = trapLock.synchronized {
     trapRequested = false
+    snapshot.set(None)
 
     trapLock.notifyAll()
   }
