@@ -895,7 +895,11 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     val result = if (lua.`type`(-1) == LuaType.TABLE) {
       // stack: <stack frame>
       val name = transformField(transformNillable(transformString), "name")(-1).map(_.toUtf8String)
-      val nameWhat = transformField(transformNillable(transformString), "namewhat")(-1).map(_.toUtf8String)
+
+      val nameWhat = transformField(transformString, "namewhat")(-1).toUtf8String match {
+        case "" => None
+        case s => Some(s)
+      }
 
       val what = transformField(transformString, "what")(-1).toUtf8String match {
         case "C" => LuaStackFrame.Info.What.C()
