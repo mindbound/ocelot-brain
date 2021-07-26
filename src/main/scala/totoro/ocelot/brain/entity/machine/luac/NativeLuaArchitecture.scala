@@ -11,7 +11,7 @@ import totoro.ocelot.brain.nbt.NBTTagCompound
 import totoro.ocelot.brain.{Ocelot, Settings}
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.collection.mutable
+import scala.collection.{SeqMap, mutable}
 
 object LuaStackFrame {
   case class Info(nameWhat: Option[String],
@@ -692,18 +692,44 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
 
       if (visitedCompoundValues add address) {
         val absoluteIndex = lua.absIndex(index)
+
+        // array part
+        val len = lua.rawLen(absoluteIndex)
+
+        val array = (1 to len).map(i => {
+          lua.rawGet(absoluteIndex, i) // stack: <tbl[i]>
+          val result = transformValue(-1).get
+          lua.pop(1)
+
+          result
+        }).toList
+
+        def isMapElement(k: Long): Boolean = !(1 to len).contains(k)
+
         lua.pushNil()
 
-        LuaValue.Table.Owned(
-          address,
-          Iterator.continually(lua.next(absoluteIndex)).takeWhile(identity).map(_ => {
-            val key = transformValue(-2).get
-            val value = transformValue(-1).get
-            lua.pop(1)
+        val map = SeqMap.from(Iterator.continually(lua.next(absoluteIndex)).takeWhile(identity).flatMap(_ => {
+          val key = transformValue(-2).get
 
-            (key, value)
-          }).toMap
-        )
+          val shouldAdd = key match {
+            case LuaValue.Number.Integer(k) => isMapElement(k)
+            case LuaValue.Number.Double(k) if k.isWhole => isMapElement(k.toLong)
+            case _ => true
+          }
+
+          val result = if (shouldAdd) {
+            Some((key, transformValue(-1).get))
+          } else None
+
+          lua.pop(1)
+
+          result
+        }).toSeq.sortWith {
+          case ((LuaValue.Number.Integer(lhs), _), (LuaValue.Number.Integer(rhs), _)) => lhs < rhs
+          case _ => false
+        })
+
+        LuaValue.Table.Owned(address, array, map)
       } else {
         LuaValue.Table.Recursion(address)
       }

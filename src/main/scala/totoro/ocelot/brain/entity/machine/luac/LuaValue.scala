@@ -1,6 +1,7 @@
 package totoro.ocelot.brain.entity.machine.luac
 
 import java.nio.charset.StandardCharsets
+import scala.collection.SeqMap
 
 sealed abstract class LuaValue
 
@@ -59,6 +60,14 @@ object LuaValue {
 
   object Table {
     case class Recursion(override val address: Long) extends Table(address)
-    case class Owned(override val address: Long, value: Map[LuaValue, LuaValue]) extends Table(address)
+
+    case class Owned(override val address: Long,
+                     array: List[LuaValue],
+                     map: SeqMap[LuaValue, LuaValue]) extends Table(address) {
+      def pairs: Iterator[(LuaValue, LuaValue)] =
+        array.iterator.zipWithIndex.map {
+          case (v, k) => (LuaValue.Number.Integer(k), v)
+        } ++ map.iterator
+    }
   }
 }
