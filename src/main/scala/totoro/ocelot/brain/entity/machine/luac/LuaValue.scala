@@ -2,26 +2,6 @@ package totoro.ocelot.brain.entity.machine.luac
 
 import java.nio.charset.StandardCharsets
 
-sealed abstract class LuaNumber {
-  def toLong: Long
-
-  def toDouble: Double
-}
-
-object LuaNumber {
-  case class Integer(value: Long) extends LuaNumber {
-    def toLong: Long = value
-
-    def toDouble: scala.Double = value.toDouble
-  }
-
-  case class Double(value: scala.Double) extends LuaNumber {
-    def toLong: Long = value.toLong
-
-    def toDouble: scala.Double = value
-  }
-}
-
 sealed abstract class LuaValue
 
 object LuaValue {
@@ -29,7 +9,25 @@ object LuaValue {
 
   case class Boolean(value: scala.Boolean) extends LuaValue
 
-  case class Number(value: LuaNumber) extends LuaValue
+  sealed abstract class Number extends LuaValue {
+    def toLong: Long
+
+    def toDouble: Double
+  }
+
+  object Number {
+    case class Integer(value: Long) extends Number {
+      def toLong: Long = value
+
+      def toDouble: scala.Double = value.toDouble
+    }
+
+    case class Double(value: scala.Double) extends Number {
+      def toLong: Long = value.toLong
+
+      def toDouble: scala.Double = value
+    }
+  }
 
   case class String(value: List[Byte]) extends LuaValue {
     def toUtf8String: scala.Predef.String = new scala.Predef.String(value.toArray, StandardCharsets.UTF_8)

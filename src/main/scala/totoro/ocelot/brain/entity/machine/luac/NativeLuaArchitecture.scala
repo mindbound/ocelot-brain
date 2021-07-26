@@ -61,7 +61,7 @@ class NativeLua52Architecture(machine: Machine) extends NativeLuaArchitecture(ma
 
   override def transformNumber(index: Int): LuaValue.Number = {
     checkType(index, LuaType.NUMBER)
-    LuaValue.Number(LuaNumber.Double(lua.toNumber(index)))
+    LuaValue.Number.Double(lua.toNumber(index))
   }
 }
 
@@ -93,14 +93,14 @@ class NativeLua53Architecture(machine: Machine) extends NativeLuaArchitecture(ma
       val highBits = lua.toNumber(-2).toLong
       val lowBits = lua.toNumber(-1).toLong
 
-      LuaNumber.Integer((highBits << 32) | lowBits)
+      LuaValue.Number.Integer((highBits << 32) | lowBits)
     } else {
-      LuaNumber.Double(lua.toNumber(absIndex))
+      LuaValue.Number.Double(lua.toNumber(absIndex))
     }
 
     lua.pop(3)
 
-    LuaValue.Number(result)
+    result
   }
 }
 
@@ -917,14 +917,14 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
         }
       }
 
-      val currentLine = optionalLong(transformField(transformNumber, "currentline")(-1).value.toLong)
-      val lineDefined = optionalLong(transformField(transformNumber, "linedefined")(-1).value.toLong)
+      val currentLine = optionalLong(transformField(transformNumber, "currentline")(-1).toLong)
+      val lineDefined = optionalLong(transformField(transformNumber, "linedefined")(-1).toLong)
 
       val lastLineDefined =
-        optionalLong(transformField(transformNumber, "lastlinedefined")(-1).value.toLong)
+        optionalLong(transformField(transformNumber, "lastlinedefined")(-1).toLong)
 
-      val upvalueCount = transformField(transformNumber, "nups")(-1).value.toLong
-      val paramCount = transformField(transformNumber, "nparams")(-1).value.toLong
+      val upvalueCount = transformField(transformNumber, "nups")(-1).toLong
+      val paramCount = transformField(transformNumber, "nparams")(-1).toLong
       val isVararg = transformField(transformBoolean, "isvararg")(-1).value
       val isTailCall = transformField(transformBoolean, "istailcall")(-1).value
       val shortSource = transformField(transformString, "short_src")(-1).toUtf8String
