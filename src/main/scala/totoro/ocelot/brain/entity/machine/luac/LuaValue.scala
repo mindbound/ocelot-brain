@@ -66,7 +66,7 @@ object LuaValue {
                      map: SeqMap[LuaValue, LuaValue]) extends Table(address) {
       def pairs: Iterator[(LuaValue, LuaValue)] =
         array.iterator.zipWithIndex.map {
-          case (v, k) => (LuaValue.Number.Integer(k), v)
+          case (v, i) => (LuaValue.Number.Integer(i + 1), v)
         } ++ map.iterator
     }
   }
