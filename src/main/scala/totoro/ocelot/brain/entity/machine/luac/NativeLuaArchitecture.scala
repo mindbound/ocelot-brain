@@ -47,7 +47,7 @@ object LuaStackFrame {
 }
 
 case class LuaLocal(name: String, value: LuaValue)
-case class LuaUpvalue(id: Long, name: String, value: LuaValue)
+case class LuaUpvalue(id: Long, name: Option[String], value: LuaValue)
 
 case class LuaStackFrame(info: LuaStackFrame.Info,
                          params: List[LuaLocal],
@@ -827,7 +827,11 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
 
             None
           } else {
-            val name = transformString(-2).toUtf8String
+            val name = transformString(-2).toUtf8String match {
+              case "" => None
+              case s => Some(s)
+            }
+
             val value = transformValue(-1).get
 
             lua.pushValue(-3) // stack: <f> <value> <name> <f>
