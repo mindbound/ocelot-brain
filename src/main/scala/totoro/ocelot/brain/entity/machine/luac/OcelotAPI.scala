@@ -14,8 +14,7 @@ class OcelotAPI(owner: NativeLuaArchitecture) extends NativeLuaAPI(owner) {
       lua.checkType(1, LuaType.THREAD)
 
       owner.trapLock.synchronized {
-        if (owner.trapRequested ||
-            (owner.debugEnabled && System.currentTimeMillis() - lastSnapshotTime > Settings.debugSnapshotIntervalMs)) {
+        if (owner.trapRequested) {
           owner.fetchSnapshot()
           lastSnapshotTime = System.currentTimeMillis()
         }

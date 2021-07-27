@@ -189,8 +189,6 @@ object Settings {
   var rTreeDebugRenderer = false
   var blockRenderId: Int = -1
 
-  val debugSnapshotIntervalMs: Long = 5
-
   def basicScreenPixels: Int = screenResolutionsByTier(0)._1 * screenResolutionsByTier(0)._2
 
   private var settings: Settings = _

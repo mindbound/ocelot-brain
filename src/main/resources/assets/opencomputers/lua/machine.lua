@@ -88,7 +88,7 @@ if ocelot then
 
   function setSandboxHook(co, mode)
     if mode and ocelot.isDebugEnabled() then
-      debug.sethook(co, debugHook, "c", hookInterval)
+      debug.sethook(co, debugHook, "", hookInterval)
     elseif mode == "deadline" then
       debug.sethook(co, checkDeadline, "", 1)
     elseif mode then
