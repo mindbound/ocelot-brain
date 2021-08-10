@@ -826,7 +826,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
         result
       }
 
-    private def getStackFrameParams(coroutineIndex: Int, frameIndex: Int): List[LuaLocal] = ensureLuaStack(0) {
+    private def getStackFrameVarargs(coroutineIndex: Int, frameIndex: Int): List[LuaLocal] = ensureLuaStack(0) {
       checkType(coroutineIndex, LuaType.THREAD)
 
       LazyList.from(-1, -1).map(getStackFrameLocal(coroutineIndex, frameIndex, _)).takeWhile(_.nonEmpty).flatten.toList
@@ -893,12 +893,18 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
         return None
       }
 
-      getStackFrameInfo(coroutineIndex, index).map(info => LuaStackFrame(
-        info = info,
-        params = getStackFrameParams(coroutineIndex, index),
-        locals = getStackFrameLocals(coroutineIndex, index),
-        upvalues = getStackFrameUpvalues(coroutineIndex, index),
-      ))
+      getStackFrameInfo(coroutineIndex, index).map(info => {
+        val varargs = getStackFrameVarargs(coroutineIndex, index)
+        val (args, locals) = getStackFrameLocals(coroutineIndex, index).splitAt(info.paramCount)
+        val params = args ++ varargs
+
+        LuaStackFrame(
+          info = info,
+          params = params,
+          locals = locals,
+          upvalues = getStackFrameUpvalues(coroutineIndex, index),
+        )
+      })
     }
 
     def getThreadStackFrames(coroutineIndex: Int): List[LuaStackFrame] = ensureLuaStack(0) {
