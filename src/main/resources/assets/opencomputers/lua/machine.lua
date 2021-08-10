@@ -70,31 +70,67 @@ local trap
 
 if ocelot then
   local machineCoroutine = coroutine.running()
+  local pendingCommand = nil
 
   local function debugHook(event)
-    trap()
-    setSandboxHook(coroutine.running(), true)
+    local command = pendingCommand
+
+    if command == "step" and event ~= "line" then
+      command = nil
+    else
+      pendingCommand = nil
+    end
+
+    local frame = debug.getinfo(2, "nSlut")
+    print("called from", frame.name, frame.namewhat, frame.what, frame.currentline)
+
+    trap(true, command)
 
     if event == "count" then
       return checkDeadline()
     end
   end
 
-  function trap()
+  local function resetHookOnReturn()
+    setSandboxHook(coroutine.running(), pendingCommand or true)
+  end
+
+  function trap(runFromHook, event)
     local remainingUntilDeadline = deadline - computer.realTime()
-    ocelot.trap(machineCoroutine)
+    local command = ocelot.trap(machineCoroutine, event)
     deadline = computer.realTime() + remainingUntilDeadline
+
+    if command == "step" or command == "step-instruction" then
+      pendingCommand = command
+      print("set command", pendingCommand, runFromHook, event)
+
+      if runFromHook then
+        return setSandboxHook(coroutine.running(), command)
+      else
+        -- N.B.: THE FOLLOWING CALL MUST NOT BE IN THE TAIL CALL POSITION
+        -- actually, it shouldn't matter as long as `trap` is not tail-called
+        debug.sethook(coroutine.running(), resetHookOnReturn, "r")
+      end
+    elseif runFromHook then
+      return setSandboxHook(coroutine.running(), true)
+    end
   end
 
   function setSandboxHook(co, mode)
     if mode and ocelot.isDebugEnabled() then
-      debug.sethook(co, debugHook, "", hookInterval)
+      if mode == "step" then
+        return debug.sethook(co, debugHook, "l", hookInterval)
+      elseif mode == "step-instruction" then
+        return debug.sethook(co, debugHook, "", 1)
+      end
+
+      return debug.sethook(co, debugHook, "", hookInterval)
     elseif mode == "deadline" then
-      debug.sethook(co, checkDeadline, "", 1)
+      return debug.sethook(co, checkDeadline, "", 1)
     elseif mode then
-      debug.sethook(co, checkDeadline, "", hookInterval)
+      return debug.sethook(co, checkDeadline, "", hookInterval)
     else
-      debug.sethook(co)
+      return debug.sethook(co)
     end
   end
 else

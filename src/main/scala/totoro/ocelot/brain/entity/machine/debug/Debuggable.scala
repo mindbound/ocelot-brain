@@ -15,4 +15,10 @@ trait Debuggable {
 
   // Continue the execution after a previous stoppage
   def resume(): Unit
+
+  // Advance the execution by a single line
+  def step(): Unit
+
+  // Advance the execution by a single instruction
+  def stepi(): Unit
 }

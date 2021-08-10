@@ -13,6 +13,18 @@ import totoro.ocelot.brain.{Ocelot, Settings}
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.{SeqMap, mutable}
 
+abstract sealed class DebugCommand
+
+object DebugCommand {
+  case class Step() extends DebugCommand {
+    override def toString: String = "step"
+  }
+
+  case class StepInstruction() extends DebugCommand {
+    override def toString: String = "step-instruction"
+  }
+}
+
 object LuaStackFrame {
   case class Info(nameWhat: Option[String],
                   name: Option[String],
@@ -396,6 +408,11 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       case Some(value) => lua = value
     }
 
+    trapped = false
+    trapRequested = false
+    debugCommand = None
+    debugEnabled = false
+
     apis.foreach(_.initialize())
 
     lua.load(classOf[Machine].getResourceAsStream(Settings.scriptPath + "machine.lua"), "=machine", "t")
@@ -530,11 +547,21 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   // The debug interface follows from now on -- an Ocelot extension
 
   private[luac] val trapLock = new Object
+  private[luac] var trapped = false
   private[luac] var trapRequested = false
+  private[luac] var debugCommand: Option[DebugCommand] = None
   private[luac] var debugEnabled = false
   private val snapshot: AtomicReference[Option[List[LuaStackFrame]]] = new AtomicReference(None)
 
   private val sourceRegistry: mutable.Map[Long, List[Byte]] = mutable.HashMap.empty
+
+  private def continue(command: Option[DebugCommand]): Unit = trapLock.synchronized {
+    trapRequested = false
+    snapshot.set(None)
+    debugCommand = command
+
+    trapLock.notifyAll()
+  }
 
   override def setDebugEnabled(enabled: Boolean): Unit = trapLock.synchronized {
     debugEnabled = enabled
@@ -547,10 +574,19 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   }
 
   override def resume(): Unit = trapLock.synchronized {
-    trapRequested = false
-    snapshot.set(None)
+    continue(None)
+  }
 
-    trapLock.notifyAll()
+  override def step(): Unit = trapLock.synchronized {
+    if (trapped) {
+      continue(Some(DebugCommand.Step()))
+    }
+  }
+
+  override def stepi(): Unit = trapLock.synchronized {
+    if (trapped) {
+      continue(Some(DebugCommand.StepInstruction()))
+    }
   }
 
   private[luac] def registerSourceMapping(funcAddr: Long, source: List[Byte]): Unit = {

@@ -5,26 +5,41 @@ import totoro.ocelot.brain.{Ocelot, Settings}
 import totoro.ocelot.brain.entity.machine.ExtendedLuaState.extendLuaState
 
 class OcelotAPI(owner: NativeLuaArchitecture) extends NativeLuaAPI(owner) {
-  private var lastSnapshotTime: Long = 0
-
   def initialize(): Unit = {
-    lua.newTable(0, 2)
+    lua.newTable(0, 4)
 
     lua.pushScalaFunction(lua => {
       lua.checkType(1, LuaType.THREAD)
 
       owner.trapLock.synchronized {
+        if (lua.isString(2)) {
+          lua.toString(2) match {
+            case "step" | "step-instruction" =>
+              owner.trapRequested = true
+
+            case _ =>
+          }
+        }
+
         if (owner.trapRequested) {
           owner.fetchSnapshot()
-          lastSnapshotTime = System.currentTimeMillis()
+          owner.trapped = true
         }
 
         while (owner.trapRequested) {
           owner.trapLock.wait()
         }
-      }
 
-      0
+        owner.debugCommand match {
+          case Some(command) => lua.pushString(command.toString)
+          case None => lua.pushNil()
+        }
+
+        owner.debugCommand = None
+        owner.trapped = false
+
+        1
+      }
     })
     lua.setField(-2, "trap")
 
