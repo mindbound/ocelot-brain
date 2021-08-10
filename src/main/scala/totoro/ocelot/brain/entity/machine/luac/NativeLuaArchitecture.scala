@@ -996,13 +996,18 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       val shortSource = transformField(transformString, "short_src")(-1).toUtf8String
       val function = transformField(transformFunction, "func")(-1)
 
+      val lines = lineDefined.zip(lastLineDefined) match {
+        case Some((0, 0)) => None
+        case s => s
+      }
+
       Some(LuaStackFrame.Info(
         name = name,
         nameWhat = nameWhat,
         what = what,
         source = source,
         currentLine = currentLine,
-        lines = lineDefined.zip(lastLineDefined),
+        lines = lines,
         upvalueCount = upvalueCount.toInt,
         paramCount = paramCount.toInt,
         vararg = isVararg,
