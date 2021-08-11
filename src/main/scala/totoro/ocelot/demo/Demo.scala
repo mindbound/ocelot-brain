@@ -4,8 +4,7 @@ import java.nio.file.Files
 import totoro.ocelot.brain.Ocelot
 import totoro.ocelot.brain.entity.traits.{Entity, Environment}
 import totoro.ocelot.brain.entity.{CPU, Case, GraphicsCard, HDDManaged, Memory, Redstone, Screen}
-import totoro.ocelot.brain.entity.machine.luac.{NativeLua53Architecture, LuaStackFrame}
-import totoro.ocelot.brain.entity.machine.debug.Debuggable
+import totoro.ocelot.brain.entity.machine.luac.{LuaStackFrame, NativeLua53Architecture, NativeLuaArchitecture}
 import totoro.ocelot.brain.event._
 import totoro.ocelot.brain.loot.Loot
 import totoro.ocelot.brain.nbt.NBTTagCompound
@@ -210,34 +209,21 @@ object Demo extends App {
   if (computer != null) println("Successfully loaded the snapshot. Continuing the execution...")
 
   computer.machine.architecture match {
-    case arch: Debuggable => arch.setDebugEnabled(true)
+    case arch: NativeLuaArchitecture => arch.setDebugEnabled(true)
     case _ =>
   }
 
   while (loadedWorkspace.getIngameTime < 100) {
     loadedWorkspace.update()
 
-    val frames = computer.machine.architecture match {
-      case arch: Debuggable => arch.getStackFrames
+    val mainThread = computer.machine.architecture match {
+      case arch: NativeLuaArchitecture => arch.getSnapshot
       case _ => List.empty
     }
 
-    frames match {
-      case Some(frames) =>
-        println("Stack frames retrieved:")
-        frames.foreach {
-          case LuaStackFrame(f, params, locals, upvalues) =>
-            println(
-              s"\tname = ${f.name}, nameWhat = ${f.nameWhat}, what = ${f.what}, source = ${f.source}, " +
-                s"current line = ${f.currentLine}, lines = ${f.lines}, ups = ${f.upvalueCount}, params = ${f.paramCount}, " +
-                s"is vararg = ${f.vararg}, is tail call = ${f.tailCall}, short source = ${f.shortSource}"
-            )
-
-            upvalues.foreach(uv => println(s"\t\tupvalue #${uv.id} ${uv.name} = ${uv.value}"))
-            params.foreach(p => println(s"\t\tparam ${p.name} = ${p.value}"))
-            locals.foreach(l => println(s"\t\tlocal ${l.name} = ${l.value}"))
-        }
-      case None => println("Stack frame info is unavailable")
+    mainThread match {
+      case Some(mainThread) => println(s"Main thread retrieved: ${mainThread}")
+      case None => println("Snapshot is unavailable")
     }
 
     Thread.sleep(50)

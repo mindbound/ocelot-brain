@@ -5,7 +5,6 @@ import com.google.common.base.Strings
 import li.cil.repack.com.naef.jnlua._
 import totoro.ocelot.brain.entity.machine.ExtendedLuaState.extendLuaState
 import totoro.ocelot.brain.entity.machine._
-import totoro.ocelot.brain.entity.machine.debug.{Debuggable, StackFrame}
 import totoro.ocelot.brain.entity.traits.{Entity, Memory}
 import totoro.ocelot.brain.nbt.NBTTagCompound
 import totoro.ocelot.brain.{Ocelot, Settings}
@@ -64,7 +63,7 @@ case class LuaUpvalue(id: Long, name: Option[String], value: LuaValue)
 case class LuaStackFrame(info: LuaStackFrame.Info,
                          params: List[LuaLocal],
                          locals: List[LuaLocal],
-                         upvalues: List[LuaUpvalue]) extends StackFrame
+                         upvalues: List[LuaUpvalue])
 
 class NativeLua52Architecture(machine: Machine) extends NativeLuaArchitecture(machine) {
   override def factory: LuaStateFactory.Lua52.type = LuaStateFactory.Lua52
@@ -116,7 +115,7 @@ class NativeLua53Architecture(machine: Machine) extends NativeLuaArchitecture(ma
   }
 }
 
-abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture with Debuggable {
+abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture {
   protected def factory: LuaStateFactory
 
   private[machine] var lua: LuaState = _
@@ -551,7 +550,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   private[luac] var trapRequested = false
   private[luac] var debugCommand: Option[DebugCommand] = None
   private[luac] var debugEnabled = false
-  private val snapshot: AtomicReference[Option[List[LuaStackFrame]]] = new AtomicReference(None)
+  private val snapshot: AtomicReference[Option[LuaValue.Thread]] = new AtomicReference(None)
 
   private val sourceRegistry: mutable.Map[Long, List[Byte]] = mutable.HashMap.empty
 
@@ -563,27 +562,27 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     trapLock.notifyAll()
   }
 
-  override def setDebugEnabled(enabled: Boolean): Unit = trapLock.synchronized {
+  def setDebugEnabled(enabled: Boolean): Unit = trapLock.synchronized {
     debugEnabled = enabled
     trapRequested = trapRequested && enabled
   }
 
-  override def break(): Unit = trapLock.synchronized {
+  def break(): Unit = trapLock.synchronized {
     setDebugEnabled(true)
     trapRequested = true
   }
 
-  override def resume(): Unit = trapLock.synchronized {
+  def resume(): Unit = trapLock.synchronized {
     continue(None)
   }
 
-  override def step(): Unit = trapLock.synchronized {
+  def step(): Unit = trapLock.synchronized {
     if (trapped) {
       continue(Some(DebugCommand.Step()))
     }
   }
 
-  override def stepi(): Unit = trapLock.synchronized {
+  def stepi(): Unit = trapLock.synchronized {
     if (trapped) {
       continue(Some(DebugCommand.StepInstruction()))
     }
@@ -1028,21 +1027,18 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     result
   }
 
-  private def getThreadStackFrames(coroutineIndex: Int): List[LuaStackFrame] =
-    (new LuaTransformer).getThreadStackFrames(coroutineIndex)
-
   private[luac] def fetchSnapshot(): Unit = ensureLuaStack(0) {
     if (lua == null) {
       snapshot.set(None)
     }
 
     pushMainThread()
-    val result = getThreadStackFrames(-1)
+    val result = transformThread(-1)
     lua.pop(1)
 
     snapshot.set(Some(result))
   }
 
-  def getStackFrames: Option[List[LuaStackFrame]] = snapshot.get()
+  def getSnapshot: Option[LuaValue.Thread] = snapshot.get()
 
 }
