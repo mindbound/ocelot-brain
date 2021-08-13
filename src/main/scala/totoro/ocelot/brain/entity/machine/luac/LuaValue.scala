@@ -3,6 +3,8 @@ package totoro.ocelot.brain.entity.machine.luac
 import java.nio.charset.StandardCharsets
 import scala.collection.SeqMap
 
+case class LuaUpvalue(id: Long, name: Option[String], value: LuaValue)
+
 sealed abstract class LuaValue
 
 object LuaValue {
@@ -34,7 +36,53 @@ object LuaValue {
     def toUtf8String: scala.Predef.String = new scala.Predef.String(value.toArray, StandardCharsets.UTF_8)
   }
 
-  case class Function(address: Long, source: Option[List[Byte]]) extends LuaValue
+  sealed abstract class Function(val address: Long) extends LuaValue
+
+  object Function {
+    case class Owned(override val address: Long,
+                     info: Info,
+                     source: Option[List[Byte]],
+                     paramNames: List[scala.Predef.String],
+                     upvalues: List[LuaUpvalue]) extends Function(address)
+
+    case class Recursion(override val address: Long) extends Function(address)
+
+    case class Info(nameWhat: Option[scala.Predef.String],
+                    name: Option[scala.Predef.String],
+                    what: Info.What,
+                    source: Info.Source,
+                    lines: Option[(Long, Long)],
+                    upvalueCount: Int,
+                    paramCount: Int,
+                    vararg: scala.Boolean,
+                    shortSource: scala.Predef.String)
+
+    object Info {
+      abstract class What
+
+      object What {
+        case class Lua() extends What {
+          override def toString: scala.Predef.String = "Lua"
+        }
+
+        case class C() extends What {
+          override def toString: scala.Predef.String = "C"
+        }
+
+        case class Main() extends What {
+          override def toString: scala.Predef.String = "main"
+        }
+      }
+
+      abstract class Source
+
+      object Source {
+        case class File(name: LuaValue.String) extends Source
+        case class String(code: LuaValue.String) extends Source
+        case class Other(source: LuaValue.String) extends Source
+      }
+    }
+  }
 
   case class Userdata(address: Long) extends LuaValue
 

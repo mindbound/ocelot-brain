@@ -24,46 +24,18 @@ object DebugCommand {
   }
 }
 
-object LuaStackFrame {
-  case class Info(nameWhat: Option[String],
-                  name: Option[String],
-                  what: Info.What,
-                  source: Info.Source,
-                  currentLine: Option[Long],
-                  lines: Option[(Long, Long)],
-                  upvalueCount: Int,
-                  paramCount: Int,
-                  vararg: Boolean,
-                  tailCall: Boolean,
-                  shortSource: String,
-                  function: LuaValue.Function)
-
-  object Info {
-    abstract class What
-
-    object What {
-      case class Lua() extends What
-      case class C() extends What
-      case class Main() extends What
-    }
-
-    abstract class Source
-
-    object Source {
-      case class File(name: scala.Predef.String) extends Source
-      case class String(code: List[Byte]) extends Source
-      case class Other(source: scala.Predef.String) extends Source
-    }
-  }
-}
-
 case class LuaLocal(name: String, value: LuaValue)
-case class LuaUpvalue(id: Long, name: Option[String], value: LuaValue)
 
 case class LuaStackFrame(info: LuaStackFrame.Info,
                          params: List[LuaLocal],
                          locals: List[LuaLocal],
                          upvalues: List[LuaUpvalue])
+
+object LuaStackFrame {
+  case class Info(currentLine: Option[Long],
+                  tailCall: Boolean,
+                  function: LuaValue.Function.Owned)
+}
 
 class NativeLua52Architecture(machine: Machine) extends NativeLuaArchitecture(machine) {
   override def factory: LuaStateFactory.Lua52.type = LuaStateFactory.Lua52
@@ -673,13 +645,22 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     LuaValue.String(lua.toByteArray(index).toList)
   }
 
-  protected def transformFunction(index: Int): LuaValue.Function = ensureLuaStack(0) {
-    checkType(index, LuaType.FUNCTION)
+  protected def transformFunctionWithDebugInfo(info: LuaValue.Function.Info,
+                                               paramNames: List[String],
+                                               upvalues: List[LuaUpvalue])(index: Int): LuaValue.Function.Owned =
+    ensureLuaStack(0) {
+      checkType(index, LuaType.FUNCTION)
 
-    val addr = lua.toPointer(index)
+      val addr = lua.toPointer(index)
 
-    LuaValue.Function(addr, sourceRegistry.get(addr))
-  }
+      LuaValue.Function.Owned(
+        info = info,
+        address = addr,
+        source = sourceRegistry.get(addr),
+        paramNames = paramNames,
+        upvalues = upvalues
+      )
+    }
 
   protected def transformUserdata(index: Int): LuaValue.Userdata = ensureLuaStack(0) {
     val `type` = lua.`type`(index)
@@ -770,6 +751,22 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       }
     }
 
+    def transformFunction(index: Int): LuaValue.Function = ensureLuaStack(0) {
+      checkType(index, LuaType.FUNCTION)
+
+      val address = lua.toPointer(index)
+
+      if (visitedCompoundValues add address) {
+        val info = getFunctionDebugInfo(index)
+        val paramNames = getFunctionParamNames(index)
+        val upvalues = getFunctionUpvalues(index)
+
+        transformFunctionWithDebugInfo(info, paramNames, upvalues)(index)
+      } else {
+        LuaValue.Function.Recursion(address)
+      }
+    }
+
     def transformValue(index: Int): Option[LuaValue] = ensureLuaStack(0) {
       lua.`type`(index) match {
         case null =>
@@ -837,73 +834,133 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       LazyList.from(1).map(getStackFrameLocal(coroutineIndex, frameIndex, _)).takeWhile(_.nonEmpty).flatten.toList
     }
 
-    private def getStackFrameUpvalues(coroutineIndex: Int, frameIndex: Int): List[LuaUpvalue] =
-      ensureLuaStack(0) {
-        checkType(coroutineIndex, LuaType.THREAD)
+    private def getStackFrameUpvalues(coroutineIndex: Int, frameIndex: Int): List[LuaUpvalue] = ensureLuaStack(0) {
+      checkType(coroutineIndex, LuaType.THREAD)
 
-        lua.pushValue(coroutineIndex) // stack: <thread>
-        lua.pushNumber(frameIndex) // stack: <frameIndex> <thread>
-        lua.pushString("f") // stack: "f" <frameIndex> <thread>
-        callDebugFunction("getinfo", 3, 1) // stack: [nil | {func = <f>}]
-        checkType(-1, LuaType.TABLE) // stack: {func = <f>}
-        lua.getField(-1, "func") // stack: <f> {func = <f>}
-        lua.replace(-2) // stack: <f>
+      lua.pushValue(coroutineIndex) // stack: <thread>
+      lua.pushNumber(frameIndex) // stack: <frameIndex> <thread>
+      lua.pushString("f") // stack: "f" <frameIndex> <thread>
+      callDebugFunction("getinfo", 3, 1) // stack: [nil | {func = <f>}]
+      checkType(-1, LuaType.TABLE) // stack: {func = <f>}
+      lua.getField(-1, "func") // stack: <f> {func = <f>}
+      lua.replace(-2) // stack: <f>
 
-        // TODO: I'm not sure if we're always going to get a function here — investigate
-        checkType(-1, LuaType.FUNCTION)
+      // TODO: I'm not sure if we're always going to get a function here — investigate
+      checkType(-1, LuaType.FUNCTION)
+      val result = getFunctionUpvalues(-1)
+      lua.pop(1) // stack restored
 
-        val result = LazyList.from(1).map(ensureLuaStack(0) { uvIndex: Int =>
-          lua.pushValue(-1) // stack: <f> <f>
-          lua.pushNumber(uvIndex) // stack: <uvIndex> <f> <f>
-          callDebugFunction("getupvalue", 2, 2) // stack: [nil nil | <value> <name>] <f>
+      result
+    }
 
-          if (lua.isNil(-2)) {
-            lua.pop(2) // stack: <f>
+    private def getFunctionUpvalues(index: Int): List[LuaUpvalue] = ensureLuaStack(0) {
+      checkType(index, LuaType.FUNCTION)
 
-            None
-          } else {
-            val name = transformString(-2).toUtf8String match {
-              case "" => None
-              case s => Some(s)
-            }
+      val absIndex = lua.absIndex(index)
 
-            val value = transformValue(-1).get
+      LazyList.from(1).map(ensureLuaStack(0) { uvIndex: Int =>
+        lua.pushValue(absIndex) // stack: <f>
+        lua.pushNumber(uvIndex) // stack: <uvIndex> <f>
+        callDebugFunction("getupvalue", 2, 2) // stack: [nil nil | <value> <name>]
 
-            lua.pushValue(-3) // stack: <f> <value> <name> <f>
-            lua.pushNumber(uvIndex) // stack: <uvIndex> <f> <value> <name> <f>
-            callDebugFunction("upvalueid", 2, 1) // stack: <id> <value> <name> <f>
-            checkType(-1, LuaType.LIGHTUSERDATA)
+        if (lua.isNil(-2)) {
+          lua.pop(2) // stack: <f>
 
-            val id = lua.toPointer(-1)
-
-            lua.pop(3) // stack: <f>
-
-            Some(LuaUpvalue(id = id, name = name, value = value))
+          None
+        } else {
+          val name = transformString(-2).toUtf8String match {
+            case "" => None
+            case s => Some(s)
           }
-        }).takeWhile(_.nonEmpty).flatten.toList
 
-        lua.pop(1) // stack restored
+          val value = transformValue(-1).get
+
+          lua.pushValue(-3) // stack: <f> <value> <name> <f>
+          lua.pushNumber(uvIndex) // stack: <uvIndex> <f> <value> <name> <f>
+          callDebugFunction("upvalueid", 2, 1) // stack: <id> <value> <name> <f>
+          checkType(-1, LuaType.LIGHTUSERDATA)
+
+          val id = lua.toPointer(-1)
+
+          lua.pop(3) // stack: <f>
+
+          Some(LuaUpvalue(id = id, name = name, value = value))
+        }
+      }).takeWhile(_.nonEmpty).flatten.toList
+    }
+
+    def getFunctionParamNames(index: Int): List[String] = ensureLuaStack(0) {
+      checkType(index, LuaType.FUNCTION)
+
+      val absIndex = lua.absIndex(index)
+
+      Iterator.from(1).map(ensureLuaStack(0) { paramIndex: Int =>
+        lua.pushValue(absIndex) // stack: <f>
+        lua.pushNumber(paramIndex) // stack: <paramIndex> <f>
+        callDebugFunction("getlocal", 2, 1) // stack: [nil | <name>]
+
+        val result = if (lua.isNil(-1)) {
+          None
+        } else {
+          Some(transformString(-1).toUtf8String)
+        }
+
+        lua.pop(1)
 
         result
-      }
+      }).takeWhile(_.nonEmpty).flatten.toList
+    }
 
     def getThreadStackFrame(coroutineIndex: Int)(index: Int): Option[LuaStackFrame] = ensureLuaStack(0) {
       if (lua == null) {
         return None
       }
 
-      getStackFrameInfo(coroutineIndex, index).map(info => {
-        val varargs = getStackFrameVarargs(coroutineIndex, index)
-        val (args, locals) = getStackFrameLocals(coroutineIndex, index).splitAt(info.paramCount)
-        val params = args ++ varargs
+      checkType(coroutineIndex, LuaType.THREAD)
 
-        LuaStackFrame(
-          info = info,
-          params = params,
-          locals = locals,
-          upvalues = getStackFrameUpvalues(coroutineIndex, index),
-        )
-      })
+      val absCoroutineIndex = lua.absIndex(coroutineIndex)
+      val stackFrameDebugInfoOptions = debugInfoOptions + "f" // ... + func
+
+      lua.pushValue(absCoroutineIndex) // stack: <thread>
+      lua.pushNumber(index) // stack: <frameIndex> <thread>
+      lua.pushString(stackFrameDebugInfoOptions) // stack: <stackFrameDebugInfoOptions> <frameIndex> <thread>
+      callDebugFunction("getinfo", 3, 1) // stack: [nil | <debug info>]
+
+      if (lua.isNil(-1)) {
+        lua.pop(1) // stack restored
+
+        return None
+      }
+
+      // stack: <debug info>
+      val functionDebugInfo = transformDebugInfo(-1)
+
+      val varargs = getStackFrameVarargs(absCoroutineIndex, index)
+      val (args, locals) = getStackFrameLocals(absCoroutineIndex, index).splitAt(functionDebugInfo.paramCount)
+      val params = args ++ varargs
+      val paramNames = args.map(local => local.name)
+      val upvalues = getStackFrameUpvalues(absCoroutineIndex, index)
+
+      val currentLine = convertOptionalLong(transformField(transformNumber, "currentline")(-1).toLong)
+      val isTailCall = transformField(transformBoolean, "istailcall")(-1).value
+
+      val functionTransformer = transformFunctionWithDebugInfo(functionDebugInfo, paramNames, upvalues)(_)
+      val function = transformField(functionTransformer, "func")(-1)
+
+      lua.pop(1) // stack: restored
+
+      val info = LuaStackFrame.Info(
+        currentLine = currentLine,
+        tailCall = isTailCall,
+        function = function,
+      )
+
+      Some(LuaStackFrame(
+        info = info,
+        params = params,
+        locals = locals,
+        upvalues = upvalues,
+      ))
     }
 
     def getThreadStackFrames(coroutineIndex: Int): List[LuaStackFrame] = ensureLuaStack(0) {
@@ -914,6 +971,8 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   protected def transformThread(index: Int): LuaValue.Thread = (new LuaTransformer).transformThread(index)
 
   protected def transformTable(index: Int): LuaValue.Table = (new LuaTransformer).transformTable(index)
+
+  protected def transformFunction(index: Int): LuaValue.Function = (new LuaTransformer).transformFunction(index)
 
   protected def transformValue(index: Int): Option[LuaValue] = (new LuaTransformer).transformValue(index)
 
@@ -937,94 +996,87 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     result
   }
 
-  private def getStackFrameInfo(coroutineIndex: Int, frameIndex: Int): Option[LuaStackFrame.Info] = ensureLuaStack(0) {
-    checkType(coroutineIndex, LuaType.THREAD)
-    lua.pushValue(coroutineIndex) // stack: <thread>
-    lua.pushNumber(frameIndex) // stack: <frameIndex> <thread>
+  private val debugInfoOptions =
+    "n" + // name, nameWhat
+      "S" + // source, short_src, linedefined, lastlinedefined, what
+      "l" + // currentline
+      "t" + // istailcall
+      "u" // nups, nparams, isvararg
 
-    val debugInfoOptions =
-      "n" + // name, nameWhat
-        "S" + // source, short_src, linedefined, lastlinedefined, what
-        "l" + // currentline
-        "t" + // istailcall
-        "u" + // nups, nparams, isvararg
-        "f" // func
+  private def convertOptionalLong(v: Long): Option[Long] = {
+    assert(v >= -1, s"invalid value ($v), expected a sentinel (-1) or a non-negative value")
 
-    lua.pushString(debugInfoOptions) // stack: "nSltu" <frameIndex> <thread>
-    callDebugFunction("getinfo", 3, 1) // stack: [nil | <stack frame>]
-
-    val optionalLong = (v: Long) => {
-      assert(v >= -1, s"debug.info produced the value $v, which is invalid")
-
-      if (v == -1) {
-        None
-      } else {
-        Some(v)
-      }
+    if (v == -1) {
+      None
+    } else {
+      Some(v)
     }
+  }
 
-    val result = if (lua.`type`(-1) == LuaType.TABLE) {
-      // stack: <stack frame>
-      val name = transformField(transformNillable(transformString), "name")(-1).map(_.toUtf8String)
+  private def getFunctionDebugInfo(index: Int): LuaValue.Function.Info = ensureLuaStack(0) {
+    checkType(index, LuaType.FUNCTION)
+    lua.pushValue(index) // stack: <function>
+    lua.pushString(debugInfoOptions) // stack: <debugInfoOptions> <function>
+    callDebugFunction("getinfo", 2, 1) // stack: <stack frame>
 
-      val nameWhat = transformField(transformString, "namewhat")(-1).toUtf8String match {
-        case "" => None
-        case s => Some(s)
-      }
-
-      val what = transformField(transformString, "what")(-1).toUtf8String match {
-        case "C" => LuaStackFrame.Info.What.C()
-        case "Lua" => LuaStackFrame.Info.What.Lua()
-        case "main" => LuaStackFrame.Info.What.Main()
-      }
-
-      val source = {
-        val sourceStr = transformField(transformString, "source")(-1).value
-
-        sourceStr.headOption match {
-          case Some('@') => LuaStackFrame.Info.Source.File(LuaValue.String(sourceStr.tail).toUtf8String)
-          case Some('=') => LuaStackFrame.Info.Source.Other(LuaValue.String(sourceStr.tail).toUtf8String)
-          case _ => LuaStackFrame.Info.Source.String(sourceStr)
-        }
-      }
-
-      val currentLine = optionalLong(transformField(transformNumber, "currentline")(-1).toLong)
-      val lineDefined = optionalLong(transformField(transformNumber, "linedefined")(-1).toLong)
-
-      val lastLineDefined =
-        optionalLong(transformField(transformNumber, "lastlinedefined")(-1).toLong)
-
-      val upvalueCount = transformField(transformNumber, "nups")(-1).toLong
-      val paramCount = transformField(transformNumber, "nparams")(-1).toLong
-      val isVararg = transformField(transformBoolean, "isvararg")(-1).value
-      val isTailCall = transformField(transformBoolean, "istailcall")(-1).value
-      val shortSource = transformField(transformString, "short_src")(-1).toUtf8String
-      val function = transformField(transformFunction, "func")(-1)
-
-      val lines = lineDefined.zip(lastLineDefined) match {
-        case Some((0, 0)) => None
-        case s => s
-      }
-
-      Some(LuaStackFrame.Info(
-        name = name,
-        nameWhat = nameWhat,
-        what = what,
-        source = source,
-        currentLine = currentLine,
-        lines = lines,
-        upvalueCount = upvalueCount.toInt,
-        paramCount = paramCount.toInt,
-        vararg = isVararg,
-        tailCall = isTailCall,
-        shortSource = shortSource,
-        function = function,
-      ))
-    } else None
-
+    val result = transformDebugInfo(-1)
     lua.pop(1) // stack restored
 
     result
+  }
+
+  private def transformDebugInfo(index: Int): LuaValue.Function.Info = ensureLuaStack(0) {
+    checkType(index, LuaType.TABLE)
+
+    val name = transformField(transformNillable(transformString), "name")(index).map(_.toUtf8String)
+
+    val nameWhat = transformField(transformString, "namewhat")(index).toUtf8String match {
+      case "" => None
+      case s => Some(s)
+    }
+
+    val what = transformField(transformString, "what")(index).toUtf8String match {
+      case "C" => LuaValue.Function.Info.What.C()
+      case "Lua" => LuaValue.Function.Info.What.Lua()
+      case "main" => LuaValue.Function.Info.What.Main()
+    }
+
+    val source = {
+      val sourceStr = transformField(transformString, "source")(index)
+
+      sourceStr.value.headOption match {
+        case Some('@') => LuaValue.Function.Info.Source.File(LuaValue.String(sourceStr.value.tail))
+        case Some('=') => LuaValue.Function.Info.Source.Other(LuaValue.String(sourceStr.value.tail))
+        case _ => LuaValue.Function.Info.Source.String(sourceStr)
+      }
+    }
+
+    val lineDefined = convertOptionalLong(transformField(transformNumber, "linedefined")(index).toLong)
+
+    val lastLineDefined =
+      convertOptionalLong(transformField(transformNumber, "lastlinedefined")(index).toLong)
+
+    val upvalueCount = transformField(transformNumber, "nups")(index).toLong
+    val paramCount = transformField(transformNumber, "nparams")(index).toLong
+    val isVararg = transformField(transformBoolean, "isvararg")(index).value
+    val shortSource = transformField(transformString, "short_src")(index).toUtf8String
+
+    val lines = lineDefined.zip(lastLineDefined) match {
+      case Some((0, 0)) => None
+      case s => s
+    }
+
+    LuaValue.Function.Info(
+      nameWhat = nameWhat,
+      name = name,
+      what = what,
+      source = source,
+      lines = lines,
+      upvalueCount = upvalueCount.toInt,
+      paramCount = paramCount.toInt,
+      vararg = isVararg,
+      shortSource = shortSource,
+    )
   }
 
   private[luac] def fetchSnapshot(): Unit = ensureLuaStack(0) {
