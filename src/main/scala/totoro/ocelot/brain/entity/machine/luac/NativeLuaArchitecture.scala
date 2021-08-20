@@ -12,6 +12,26 @@ import totoro.ocelot.brain.{Ocelot, Settings}
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.{SeqMap, mutable}
 
+abstract sealed class DebugState(val debugEnabled: Boolean, val trapRequested: Boolean) {
+  def withDebugEnabled(enabled: Boolean): DebugState = (this, enabled) match {
+    case (DebugState.Disabled, true) => DebugState.Enabled
+    case (_, false) => DebugState.Disabled
+    case _ => this
+  }
+
+  def withTrapRequested(enabled: Boolean): DebugState = (this, enabled) match {
+    case (DebugState.TrapRequested, false) => DebugState.Enabled
+    case (DebugState.Enabled, true) => DebugState.TrapRequested
+    case _ => this
+  }
+}
+
+object DebugState {
+  case object Disabled extends DebugState(false, false)
+  case object Enabled extends DebugState(true, false)
+  case object TrapRequested extends DebugState(true, true)
+}
+
 abstract sealed class DebugCommand
 
 object DebugCommand {
@@ -380,9 +400,8 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     }
 
     trapped = false
-    trapRequested = false
+    debugState = DebugState.Disabled
     debugCommand = None
-    debugEnabled = false
 
     apis.foreach(_.initialize())
 
@@ -519,15 +538,14 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
 
   private[luac] val trapLock = new Object
   private[luac] var trapped = false
-  private[luac] var trapRequested = false
+  private[luac] var debugState: DebugState = DebugState.Disabled
   private[luac] var debugCommand: Option[DebugCommand] = None
-  private[luac] var debugEnabled = false
   private val snapshot: AtomicReference[Option[LuaValue.Thread]] = new AtomicReference(None)
 
   private val sourceRegistry: mutable.Map[Long, List[Byte]] = mutable.HashMap.empty
 
   private def continue(command: Option[DebugCommand]): Unit = trapLock.synchronized {
-    trapRequested = false
+    debugState = debugState.withTrapRequested(false)
     snapshot.set(None)
     debugCommand = command
 
@@ -535,13 +553,11 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   }
 
   def setDebugEnabled(enabled: Boolean): Unit = trapLock.synchronized {
-    debugEnabled = enabled
-    trapRequested = trapRequested && enabled
+    debugState = debugState.withDebugEnabled(enabled)
   }
 
   def break(): Unit = trapLock.synchronized {
-    setDebugEnabled(true)
-    trapRequested = true
+    debugState = debugState.withDebugEnabled(true).withTrapRequested(true)
   }
 
   def resume(): Unit = trapLock.synchronized {

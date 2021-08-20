@@ -1,7 +1,7 @@
 package totoro.ocelot.brain.entity.machine.luac
 
 import li.cil.repack.com.naef.jnlua.LuaType
-import totoro.ocelot.brain.{Ocelot, Settings}
+import totoro.ocelot.brain.Ocelot
 import totoro.ocelot.brain.entity.machine.ExtendedLuaState.extendLuaState
 
 class OcelotAPI(owner: NativeLuaArchitecture) extends NativeLuaAPI(owner) {
@@ -14,19 +14,19 @@ class OcelotAPI(owner: NativeLuaArchitecture) extends NativeLuaAPI(owner) {
       owner.trapLock.synchronized {
         if (lua.isString(2)) {
           lua.toString(2) match {
-            case "step" | "step-instruction" =>
-              owner.trapRequested = true
+            case "step" | "step-instruction" | "pause" =>
+              owner.debugState = owner.debugState.withTrapRequested(true)
 
-            case _ =>
+            case _ => throw new IllegalArgumentException("unknown command name")
           }
         }
 
-        if (owner.trapRequested) {
+        if (owner.debugState.trapRequested) {
           owner.fetchSnapshot()
           owner.trapped = true
         }
 
-        while (owner.trapRequested) {
+        while (owner.debugState.trapRequested) {
           owner.trapLock.wait()
         }
 
@@ -51,7 +51,7 @@ class OcelotAPI(owner: NativeLuaArchitecture) extends NativeLuaAPI(owner) {
     lua.setField(-2, "version")
 
     lua.pushScalaFunction(lua => owner.trapLock.synchronized {
-      lua.pushBoolean(owner.debugEnabled)
+      lua.pushBoolean(owner.debugState.debugEnabled)
 
       1
     })

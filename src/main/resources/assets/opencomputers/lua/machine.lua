@@ -66,7 +66,7 @@ end
 -------------------------------------------------------------------------------
 -- The debug interface -- an Ocelot extension
 
-local trap
+local trap, spcall
 
 if ocelot then
   local machineCoroutine = coroutine.running()
@@ -97,12 +97,11 @@ if ocelot then
 
   function trap(runFromHook, event)
     local remainingUntilDeadline = deadline - computer.realTime()
-    local command = ocelot.trap(machineCoroutine, event)
+    local command = spcall(ocelot.trap, machineCoroutine, event)
     deadline = computer.realTime() + remainingUntilDeadline
 
     if command == "step" or command == "step-instruction" then
       pendingCommand = command
-      print("set command", pendingCommand, runFromHook, event)
 
       if runFromHook then
         return setSandboxHook(coroutine.running(), command)
@@ -760,7 +759,7 @@ end
 
 -------------------------------------------------------------------------------
 
-local function spcall(...)
+function spcall(...)
   local result = table.pack(pcall(...))
   if not result[1] then
     error(tostring(result[2]), 0)
@@ -1556,6 +1555,19 @@ local libunicode = {
   end
 }
 sandbox.unicode = libunicode
+
+sandbox.ocelot = {
+  pause = function()
+    if not ocelot.isDebugEnabled() then
+      error("debugging is not enabled", 0)
+    end
+
+    trap(false, "pause")
+  end,
+
+  version = ocelot.version,
+  isDebugEnabled = ocelot.isDebugEnabled,
+}
 
 -------------------------------------------------------------------------------
 
