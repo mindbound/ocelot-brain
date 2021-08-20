@@ -5,10 +5,11 @@ import scala.collection.SeqMap
 
 case class LuaUpvalue(id: Long, name: Option[String], value: LuaValue)
 
-sealed abstract class LuaValue
+abstract sealed class LuaValue
 
 object LuaValue {
-  case class Nil() extends LuaValue
+  abstract sealed class Nil extends LuaValue
+  case object Nil extends Nil
 
   case class Boolean(value: scala.Boolean) extends LuaValue
 
@@ -61,15 +62,15 @@ object LuaValue {
       abstract class What
 
       object What {
-        case class Lua() extends What {
+        case object Lua extends What {
           override def toString: scala.Predef.String = "Lua"
         }
 
-        case class C() extends What {
+        case object C extends What {
           override def toString: scala.Predef.String = "C"
         }
 
-        case class Main() extends What {
+        case object Main extends What {
           override def toString: scala.Predef.String = "main"
         }
       }
@@ -92,10 +93,10 @@ object LuaValue {
     sealed abstract class State
 
     object State {
-      case class Running() extends State
-      case class Suspended() extends State
-      case class Normal() extends State
-      case class Dead() extends State
+      case object Running extends State
+      case object Suspended extends State
+      case object Normal extends State
+      case object Dead extends State
     }
 
     case class Recursion(override val address: Long, override val state: State) extends Thread(address, state)

@@ -646,7 +646,7 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
   protected def transformNil(index: Int): LuaValue.Nil = ensureLuaStack(0) {
     checkType(index, LuaType.NIL)
 
-    LuaValue.Nil()
+    LuaValue.Nil
   }
 
   protected def transformBoolean(index: Int): LuaValue.Boolean = ensureLuaStack(0) {
@@ -700,10 +700,10 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
       lua.call(1, 1) // stack: <status> coroutine _G
 
       val state = transformString(-1).toUtf8String match {
-        case "running" => LuaValue.Thread.State.Running()
-        case "suspended" => LuaValue.Thread.State.Suspended()
-        case "normal" => LuaValue.Thread.State.Normal()
-        case "dead" => LuaValue.Thread.State.Dead()
+        case "running" => LuaValue.Thread.State.Running
+        case "suspended" => LuaValue.Thread.State.Suspended
+        case "normal" => LuaValue.Thread.State.Normal
+        case "dead" => LuaValue.Thread.State.Dead
       }
 
       lua.pop(3) // stack restored
@@ -1052,9 +1052,9 @@ abstract class NativeLuaArchitecture(val machine: Machine) extends Architecture 
     }
 
     val what = transformField(transformString, "what")(index).toUtf8String match {
-      case "C" => LuaValue.Function.Info.What.C()
-      case "Lua" => LuaValue.Function.Info.What.Lua()
-      case "main" => LuaValue.Function.Info.What.Main()
+      case "C" => LuaValue.Function.Info.What.C
+      case "Lua" => LuaValue.Function.Info.What.Lua
+      case "main" => LuaValue.Function.Info.What.Main
     }
 
     val source = {
