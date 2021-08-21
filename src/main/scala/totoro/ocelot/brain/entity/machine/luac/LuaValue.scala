@@ -17,6 +17,17 @@ object LuaValue {
     def toLong: Long
 
     def toDouble: Double
+
+    override def toString: Predef.String = this match {
+      case LuaValue.Number.Integer(value) => value.toString
+
+      case LuaValue.Number.Double(value) => value match {
+        case v if v.isPosInfinity => "inf"
+        case v if v.isNegInfinity => "-inf"
+        case v if v.isNaN => if ((java.lang.Double.doubleToRawLongBits(v) >>> 63) == 0x0) "nan" else "-nan"
+        case v => v.toString
+      }
+    }
   }
 
   object Number {
@@ -34,7 +45,7 @@ object LuaValue {
   }
 
   case class String(value: List[Byte]) extends LuaValue {
-    def toUtf8String: scala.Predef.String = new scala.Predef.String(value.toArray, StandardCharsets.UTF_8)
+    def toUtf8String: Predef.String = new Predef.String(value.toArray, StandardCharsets.UTF_8)
   }
 
   sealed abstract class Function(val address: Long) extends LuaValue
@@ -43,35 +54,35 @@ object LuaValue {
     case class Owned(override val address: Long,
                      info: Info,
                      source: Option[List[Byte]],
-                     paramNames: List[scala.Predef.String],
+                     paramNames: List[Predef.String],
                      upvalues: List[LuaUpvalue]) extends Function(address)
 
     case class Recursion(override val address: Long) extends Function(address)
 
-    case class Info(nameWhat: Option[scala.Predef.String],
-                    name: Option[scala.Predef.String],
+    case class Info(nameWhat: Option[Predef.String],
+                    name: Option[Predef.String],
                     what: Info.What,
                     source: Info.Source,
                     lines: Option[(Long, Long)],
                     upvalueCount: Int,
                     paramCount: Int,
                     vararg: scala.Boolean,
-                    shortSource: scala.Predef.String)
+                    shortSource: Predef.String)
 
     object Info {
       abstract class What
 
       object What {
         case object Lua extends What {
-          override def toString: scala.Predef.String = "Lua"
+          override def toString: Predef.String = "Lua"
         }
 
         case object C extends What {
-          override def toString: scala.Predef.String = "C"
+          override def toString: Predef.String = "C"
         }
 
         case object Main extends What {
-          override def toString: scala.Predef.String = "main"
+          override def toString: Predef.String = "main"
         }
       }
 
