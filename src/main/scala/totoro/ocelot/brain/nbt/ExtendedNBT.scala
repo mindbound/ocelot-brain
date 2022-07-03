@@ -234,7 +234,7 @@ object ExtendedNBT {
       nbt.appendTag(t)
     }
 
-    def append(values: Iterable[NBTBase]): Unit = {
+    def append(values: IterableOnce[NBTBase]): Unit = {
       for (value <- values) {
         nbt.appendTag(value)
       }
