@@ -1,6 +1,7 @@
 package totoro.ocelot.brain.entity.traits
 
 import totoro.ocelot.brain.Ocelot
+import totoro.ocelot.brain.event.{EventBus, InventoryEntityAddedEvent, InventoryEntityRemovedEvent}
 import totoro.ocelot.brain.nbt.ExtendedNBT._
 import totoro.ocelot.brain.nbt.persistence.NBTPersistence
 import totoro.ocelot.brain.nbt.{NBT, NBTTagCompound}
@@ -25,23 +26,30 @@ trait Inventory extends WorkspaceAware with Persistable {
   final val inventory: InventoryProxy = new InventoryProxy
 
   /**
-    * Is called any time new entity is added to the inventory
+    * Called after a new entity is added to the inventory.
     */
-  def onEntityAdded(entity: Entity): Unit = {
+  def onEntityAdded(slot: Slot, entity: Entity): Unit = {
     entity match {
       case e: WorkspaceAware => e.workspace = workspace
       case _ =>
     }
+
+    EventBus.send(InventoryEntityAddedEvent(slot, entity))
   }
 
   /**
-   * Is called any time new entity is removed from the inventory
-   */
-  def onEntityRemoved(entity: Entity): Unit = {
+    * Called after an entity is removed from the inventory.
+    *
+    * Note that at the time the method is called, the element is no longer present in the inventory.
+    * Therefore, adding it back here effectively cancels entity removal.
+    */
+  def onEntityRemoved(slot: Slot, entity: Entity): Unit = {
     entity match {
       case e: WorkspaceAware => e.workspace = null
       case _ =>
     }
+
+    EventBus.send(InventoryEntityRemovedEvent(slot, entity))
   }
 
   override def onWorkspaceChange(newWorkspace: Workspace): Unit = {
@@ -99,7 +107,7 @@ trait Inventory extends WorkspaceAware with Persistable {
     )
   }
 
-  sealed class Slot private[Inventory] (val index: Int) {
+  final class Slot private[Inventory](val index: Int) {
     if (index < 0) {
       throw new IllegalArgumentException("negative slot index: " + index)
     }
@@ -110,14 +118,34 @@ trait Inventory extends WorkspaceAware with Persistable {
 
     def put(entity: Entity): Option[Entity] = inventory.put(index, entity)
 
+    def set(entity: Option[Entity]): Option[Entity] = entity match {
+      case Some(entity) => put(entity)
+      case None => remove()
+    }
+
     def remove(): Option[Entity] = inventory.remove(index)
 
     def get: Option[Entity] = slots.get(index)
 
     def inventory: InventoryProxy = Inventory.this.inventory
+
+    override def equals(other: Any): Boolean = other match {
+      case that: Slot =>
+        inventory.owner == that.inventory.owner &&
+          index == that.index
+
+      case _ => false
+    }
+
+    override def hashCode(): Int = {
+      val state = Seq(inventory.owner, index)
+      state.map(_.hashCode()).foldLeft(0)((a, b) => 31 * a + b)
+    }
   }
 
   final class InventoryProxy extends Iterable[Slot] {
+    val owner: Inventory = Inventory.this
+
     override def iterator: Iterator[Slot] = slots.keysIterator.map(slot)
 
     def entities: Iterable[Entity] = entitySlotIndices.view.keys
@@ -132,9 +160,11 @@ trait Inventory extends WorkspaceAware with Persistable {
 
     def clear(): Boolean = {
       if (slots.nonEmpty) {
-        slots.values.foreach(onEntityRemoved)
+        // the callback is called AFTER the elements get removed
+        val contents = slots.clone()
         slots.clear()
         entitySlotIndices.clear()
+        contents.iterator.foreach { case (index, entity) => onEntityRemoved(slot(index), entity) }
 
         true
       } else false
@@ -143,7 +173,7 @@ trait Inventory extends WorkspaceAware with Persistable {
     private[Inventory] def remove(index: Int): Option[Entity] = {
       slots.remove(index).tapEach(entity => {
         entitySlotIndices.remove(entity)
-        onEntityRemoved(entity)
+        onEntityRemoved(slot(index), entity)
       }).headOption
     }
 
@@ -151,7 +181,7 @@ trait Inventory extends WorkspaceAware with Persistable {
       entitySlotIndices.remove(entity) match {
         case Some(index) =>
           slots.remove(index)
-          onEntityRemoved(entity)
+          onEntityRemoved(slot(index), entity)
 
           Some(entity)
 
@@ -160,12 +190,16 @@ trait Inventory extends WorkspaceAware with Persistable {
     }
 
     private[Inventory] def put(index: Int, entity: Entity): Option[Entity] = {
+      if (entitySlotIndices.get(entity).contains(index)) {
+        return Some(entity)
+      }
+
       val previousEntity = remove(index)
       remove(entity)
 
       slots += index -> entity
       entitySlotIndices += entity -> index
-      onEntityAdded(entity)
+      onEntityAdded(slot(index), entity)
 
       previousEntity
     }

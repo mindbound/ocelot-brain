@@ -129,27 +129,27 @@ object Demo extends App {
   computer.setCustomData(new PersistableString("xxx"))
 
   // register some event listeners
-  EventBus.listenTo(classOf[BeepEvent], { case event: BeepEvent =>
+  EventBus.subscribe[BeepEvent] { event =>
     println(s"[EVENT] Beep (address = ${event.address}, frequency = ${event.frequency}, duration = ${event.duration})")
-  })
-  EventBus.listenTo(classOf[BeepPatternEvent], { case event: BeepPatternEvent =>
+  }
+  EventBus.subscribe[BeepPatternEvent] { event =>
     println(s"[EVENT] Beep (address = ${event.address}, pattern = ${event.pattern})")
-  })
-  EventBus.listenTo(classOf[MachineCrashEvent], { case event: MachineCrashEvent =>
+  }
+  EventBus.subscribe[MachineCrashEvent] { event =>
     println(s"[EVENT] Machine crash! (address = ${event.address}, ${event.message})")
-  })
-  EventBus.listenTo(classOf[FileSystemActivityEvent], { case event: FileSystemActivityEvent =>
+  }
+  EventBus.subscribe[FileSystemActivityEvent] { event =>
     println(s"[EVENT] Filesystem activity (address = ${event.address}, type = ${event.activityType})")
-  })
-  EventBus.listenTo(classOf[TextBufferSetEvent], { case event: TextBufferSetEvent =>
+  }
+  EventBus.subscribe[TextBufferSetEvent] { event =>
     println(s"[EVENT] Text buffer set (address = ${event.address}, ${event.x}, ${event.y}, ${event.value}, ${event.vertical})")
-  })
-  EventBus.listenTo(classOf[TextBufferSetForegroundColorEvent], { case event: TextBufferSetForegroundColorEvent =>
+  }
+  EventBus.subscribe[TextBufferSetForegroundColorEvent] { event =>
     println(s"[EVENT] Foreground color changed (address = ${event.address}, ${event.color})")
-  })
-  EventBus.listenTo(classOf[TextBufferSetBackgroundColorEvent], { case event: TextBufferSetBackgroundColorEvent =>
+  }
+  EventBus.subscribe[TextBufferSetBackgroundColorEvent] { event =>
     println(s"[EVENT] Background color changed (address = ${event.address}, ${event.color})")
-  })
+  }
 
   /**
     * The computer can be turned on or off. By defaults it is turned off.

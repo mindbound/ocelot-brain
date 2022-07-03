@@ -22,20 +22,22 @@ trait ComponentInventory extends Inventory with Environment with Entity {
     disconnectComponents()
   }
 
-  override def onEntityAdded(entity: Entity): Unit = {
-    super.onEntityAdded(entity)
+  override def onEntityAdded(slot: Slot, entity: Entity): Unit = {
+    super.onEntityAdded(slot, entity)
+
     entity match {
       case environment: Environment =>
         node.connect(environment.node)
     }
   }
 
-  override def onEntityRemoved(entity: Entity): Unit = {
+  override def onEntityRemoved(slot: Slot, entity: Entity): Unit = {
     entity match {
       case environment: Environment =>
         environment.node.remove()
     }
-    super.onEntityRemoved(entity)
+
+    super.onEntityRemoved(slot, entity)
   }
 
   override def onConnect(node: Node): Unit = {
