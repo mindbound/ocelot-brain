@@ -1,5 +1,6 @@
 package totoro.ocelot.brain.nbt.persistence
 
+import totoro.ocelot.brain.Ocelot
 import totoro.ocelot.brain.entity.traits.Tiered
 import totoro.ocelot.brain.nbt.NBTTagCompound
 import totoro.ocelot.brain.util.Persistable
@@ -54,13 +55,21 @@ object NBTPersistence {
 
   def load(nbt: NBTTagCompound, workspace: Workspace): Persistable = {
     val className = nbt.getString(TypeTag)
-    val persistable = if (constructors.contains(className)) {
-      constructors(className).construct(nbt, className, workspace)
-    } else {
-      val clazz = Class.forName(className)
-      val constructor = clazz.getConstructor()
-      constructor.newInstance().asInstanceOf[Persistable]
+    val persistable = try {
+      if (constructors.contains(className)) {
+        constructors(className).construct(nbt, className, workspace)
+      } else {
+        val clazz = Class.forName(className)
+        val constructor = clazz.getConstructor()
+        constructor.newInstance().asInstanceOf[Persistable]
+      }
+    } catch {
+      case exc: Exception =>
+        Ocelot.log.atError().withThrowable(exc).log(s"Could not deserialize a Persistable ($className) from NBT")
+
+        throw exc
     }
+
     load(nbt, persistable, workspace)
   }
 
