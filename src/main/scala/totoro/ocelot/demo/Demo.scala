@@ -116,7 +116,7 @@ object Demo extends App {
 //  eeprom.label = "Test BIOS"
 //  computer.add(eeprom)
 
-  computer.inventory(5) = Loot.OpenOsEEPROM.create()
+  computer.inventory(5) = Loot.LuaBiosEEPROM.create()
   computer.inventory(6) = Loot.OpenOsFloppy.create()
 
   val screen = workspace.add(new Screen(Tier.One))

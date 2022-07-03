@@ -9,22 +9,22 @@ import totoro.ocelot.brain.workspace.Workspace
 import totoro.ocelot.brain.{Ocelot, Settings}
 
 object Loot {
-  var OpenOsEEPROM: LootFactory[EEPROM] = _
-  var AdvLoaderEEPROM: LootFactory[EEPROM] = _
-  var CyanBIOSEEPROM: LootFactory[EEPROM] = _
-  var MineOSEFIEEPROM: LootFactory[EEPROM] = _
+  var LuaBiosEEPROM: EEPROMFactory = _
+  var AdvLoaderEEPROM: EEPROMFactory = _
+  var CyanBIOSEEPROM: EEPROMFactory = _
+  var MineOSEFIEEPROM: EEPROMFactory = _
 
-  var NetworkFloppy: LootFactory[LootFloppy] = _
-  var Plan9kFloppy: LootFactory[LootFloppy] = _
-  var IrcFloppy: LootFactory[LootFloppy] = _
-  var OpenLoaderFloppy: LootFactory[LootFloppy] = _
-  var OpenOsFloppy: LootFactory[LootFloppy] = _
-  var OPPMFloppy: LootFactory[LootFloppy] = _
-  var DataFloppy: LootFactory[LootFloppy] = _
+  var NetworkFloppy: FloppyFactory = _
+  var Plan9kFloppy: FloppyFactory = _
+  var IrcFloppy: FloppyFactory = _
+  var OpenLoaderFloppy: FloppyFactory = _
+  var OpenOsFloppy: FloppyFactory = _
+  var OPPMFloppy: FloppyFactory = _
+  var DataFloppy: FloppyFactory = _
 
   def init(): Unit = {
     // EEPROM
-    OpenOsEEPROM = new EEPROMFactory("OpenOS BIOS", "bios.lua")
+    LuaBiosEEPROM = new EEPROMFactory("Lua BIOS", "bios.lua")
     AdvLoaderEEPROM = new EEPROMFactory("advancedLoader", "advLoader.lua")
     CyanBIOSEEPROM = new EEPROMFactory("Cyan BIOS", "cyan.lua")
     MineOSEFIEEPROM = new EEPROMFactory("MineOS EFI", "mineosEFI.lua")
@@ -72,11 +72,11 @@ object Loot {
     }
   }
 
-  class FloppyFactory(name: String, color: DyeColor, path: String) extends LootFactory[LootFloppy] {
+  class FloppyFactory(val name: String, val color: DyeColor, path: String) extends LootFactory[LootFloppy] {
     override def create() = new LootFloppy(name, color, path)
   }
 
-  class EEPROMFactory(label: String, file: String, readonly: Boolean = false) extends LootFactory[EEPROM] {
+  class EEPROMFactory(val label: String, file: String, readonly: Boolean = false) extends LootFactory[EEPROM] {
     private val code = new Array[Byte](4 * 1024)
     private val count = Ocelot.getClass.getResourceAsStream(Settings.scriptPath + file).read(code)
     private val codeData = code.take(count)
