@@ -68,8 +68,7 @@ object NBTPersistence {
       }
     } catch {
       case exc: Exception =>
-        Ocelot.log.atError().withThrowable(exc).log(s"Could not deserialize a Persistable ($className) from NBT")
-
+        Ocelot.log.atError().setCause(exc).log(s"Could not deserialize a Persistable ($className) from NBT")
         throw exc
     }
 

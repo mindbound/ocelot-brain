@@ -6,8 +6,8 @@ version := "0.21.1"
 scalaVersion := "2.13.15"
 
 libraryDependencies ++= Seq(
-  "org.apache.logging.log4j" % "log4j-core" % "2.20.0",
-  "org.apache.logging.log4j" % "log4j-api" % "2.20.0",
+  "ch.qos.logback" % "logback-core" % "1.5.9",
+  "ch.qos.logback" % "logback-classic" % "1.5.9",
   "com.google.guava" % "guava" % "31.1-jre",
   "commons-codec" % "commons-codec" % "1.15",
   "com.typesafe" % "config" % "1.4.2",

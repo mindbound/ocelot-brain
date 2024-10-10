@@ -1,6 +1,6 @@
 package totoro.ocelot.brain
 
-import org.apache.logging.log4j.{LogManager, Logger}
+import org.slf4j.{Logger, LoggerFactory}
 import totoro.ocelot.brain.entity._
 import totoro.ocelot.brain.entity.machine.luac.{LuaStateFactory, NativeLua52Architecture, NativeLua53Architecture, NativeLua54Architecture}
 import totoro.ocelot.brain.entity.machine.luaj.LuaJLuaArchitecture
@@ -17,7 +17,7 @@ object Ocelot {
   // do not forget to change the version in `build.sbt`
   final val Version = "0.21.1"
 
-  def log: Logger = logger.getOrElse(LogManager.getLogger(Name))
+  def log: Logger = logger.getOrElse(LoggerFactory.getLogger(Name))
   var logger: Option[Logger] = None
 
   var configPath: Option[Path] = None
