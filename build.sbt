@@ -6,8 +6,8 @@ version := "0.21.1"
 scalaVersion := "2.13.15"
 
 libraryDependencies ++= Seq(
-  "ch.qos.logback" % "logback-core" % "1.5.9",
-  "ch.qos.logback" % "logback-classic" % "1.5.9",
+  "ch.qos.logback" % "logback-core" % "1.5.9" % "provided",
+  "ch.qos.logback" % "logback-classic" % "1.5.9" % "provided",
   "com.google.guava" % "guava" % "31.1-jre",
   "commons-codec" % "commons-codec" % "1.15",
   "com.typesafe" % "config" % "1.4.2",
