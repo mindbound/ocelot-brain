@@ -5,13 +5,13 @@ import totoro.ocelot.brain.util.Tier.Tier
 object ExtendedTier extends Enumeration {
   type ExtendedTier = ExtendedTierVal
 
-  val One: ExtendedTier = ExtendedTierVal("1", "Tier 1")
-  val OneHalf: ExtendedTier = ExtendedTierVal("1.5", "Tier 1.5")
-  val Two: ExtendedTier = ExtendedTierVal("2", "Tier 2")
-  val TwoHalf: ExtendedTier = ExtendedTierVal("2.5", "Tier 2.5")
-  val Three: ExtendedTier = ExtendedTierVal("3", "Tier 3")
-  val ThreeHalf: ExtendedTier = ExtendedTierVal("3.5", "Tier 3.5")
-  val Creative: ExtendedTier = ExtendedTierVal("Creative")
+  val One: ExtendedTier = ExtendedTierVal("1", "tier.one")
+  val OneHalf: ExtendedTier = ExtendedTierVal("1.5", "tier.oneHalf")
+  val Two: ExtendedTier = ExtendedTierVal("2", "tier.two")
+  val TwoHalf: ExtendedTier = ExtendedTierVal("2.5", "tier.twoHalf")
+  val Three: ExtendedTier = ExtendedTierVal("3", "tier.three")
+  val ThreeHalf: ExtendedTier = ExtendedTierVal("3.5", "tier.threeHalf")
+  val Creative: ExtendedTier = ExtendedTierVal("Creative", "tier.creative")
 
   protected class ExtendedTierVal(name: String, val label: String) extends super.Val(name) {
     def toTier: Tier = this match {

@@ -16,10 +16,10 @@ import totoro.ocelot.brain.util.ExtendedTier.ExtendedTier
 object Tier extends Enumeration {
   type Tier = TierVal
 
-  val One: Tier = TierVal("1", "Tier 1")
-  val Two: Tier = TierVal("2", "Tier 2")
-  val Three: Tier = TierVal("3", "Tier 3")
-  val Creative: Tier = TierVal("Creative")
+  val One: Tier = TierVal("1", "tier.one")
+  val Two: Tier = TierVal("2", "tier.two")
+  val Three: Tier = TierVal("3", "tier.three")
+  val Creative: Tier = TierVal("Creative", "tier.creative")
 
   protected class TierVal(name: String, val label: String) extends super.Val(name) {
     /**
