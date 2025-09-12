@@ -217,7 +217,12 @@ class Settings(val config: Config) {
   def internetAccessAllowed: Boolean = internetAccessConfigured && !internetFilteringRulesInvalid
 
   // >= 1.8.8
-  val httpUserAgent: String = config.getString("internet.httpUserAgent")
+  val httpUserAgent: String =
+    if (config.hasPath("internet.httpUserAgent")) {
+      config.getString("internet.httpUserAgent")
+    } else {
+      "ocelot/$version"
+    }
 }
 
 object Settings {
