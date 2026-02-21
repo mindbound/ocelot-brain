@@ -16,7 +16,7 @@ object Ocelot {
   final val Name = "Ocelot"
 
   // do not forget to change the version in `build.sbt`
-  final val Version = "0.24.2"
+  final val Version = "0.24.2-online"
 
   // as taken from OpenComputers repository release tags (for example "1.7.10-forge/1.8.9" -> "1.8.9")
   final val OpenComputersVersion = "1.8.9a"
