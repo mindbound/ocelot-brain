@@ -10,4 +10,9 @@ class HDDManaged(override var tier: Tier) extends Entity with DiskManaged with T
   def speed: Int = tier.num + 1
 
   override val activityType: Option[ActivityType] = Some(HDD)
+
+  def this(tier: Tier, address: String) = {
+    this(tier)
+    this.address = Option(address)
+  }
 }
