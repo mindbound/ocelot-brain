@@ -235,6 +235,10 @@ class TextBuffer(var bufferTier: Tier = Tier.One)
     sendToKeyboards("keyboard.keyUp", player, Char.box(character), Int.box(code))
   }
 
+  override def textInput(codePoint: Int, player: User): Unit = {
+    sendToKeyboards("keyboard.textInput", player, Int.box(codePoint))
+  }
+
   override def clipboard(value: String, player: User): Unit = {
     sendToKeyboards("keyboard.clipboard", player, value)
   }

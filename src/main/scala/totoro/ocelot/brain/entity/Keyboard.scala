@@ -67,6 +67,13 @@ class Keyboard extends Entity with Environment with DeviceInfo {
             }
           case _ =>
         }
+      case Array(p: User, codePt: Integer) if message.name == "keyboard.textInput" =>
+        if (Settings.get.inputUsername) {
+          signal(p, "text_input", new String(Character.toChars(codePt)), p.nickname)
+        }
+        else {
+          signal(p, "text_input", new String(Character.toChars(codePt)))
+        }
       case Array(p: User, value: String) if message.name == "keyboard.clipboard" =>
         for (line <- value.linesWithSeparators) {
           if (Settings.get.inputUsername) {
@@ -84,5 +91,4 @@ class Keyboard extends Entity with Environment with DeviceInfo {
 
   protected def signal(args: AnyRef*): Unit =
     node.sendToReachable("computer.checked_signal", args: _*)
-
 }

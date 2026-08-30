@@ -51,6 +51,7 @@ class GpuTextBuffer(val owner: String, val id: Int, val data: GenericTextBuffer)
 
   override def keyDown(character: Char, code: Int, player: User): Unit = {}
   override def keyUp(character: Char, code: Int, player: User): Unit = {}
+  override def textInput(codePoint: Int, player: User): Unit = {}
   override def clipboard(value: String, player: User): Unit = {}
   override def mouseDown(x: Double, y: Double, button: Int, player: User): Unit = {}
   override def mouseDrag(x: Double, y: Double, button: Int, player: User): Unit = {}

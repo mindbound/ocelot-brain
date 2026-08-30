@@ -554,6 +554,17 @@ trait TextBufferProxy extends Environment {
   def keyUp(character: Char, code: Int, player: User): Unit
 
   /**
+    * Signals a code-point (text) event for the buffer.
+    *
+    * This will trigger a message that will be picked up by
+    * keyboards, which will then cause a signal in attached machines.
+    *
+    * @param codePoint the code point being typed.
+    * @param player    the player that typed the code point. Pass `null` on the client side.
+    */
+  def textInput(codePoint: Int, player: User): Unit
+
+  /**
     * Signals a clipboard paste event for the buffer.
     *
     * This will trigger a message that will be picked up by

@@ -97,6 +97,8 @@ class TapeDriveState(tapeDrive: TapeDrive) {
       }
 
       None
+
+    case _ => None
   }
 }
 
